@@ -6,63 +6,87 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Janitor = require(ReplicatedStorage.Common.lib.Janitor)
 
+local accessoryLimit = 15
 local currentCategory = ""
-local currentHumanoid = nil
 local currentDescription = nil
 
 local player = Players.LocalPlayer
-local editorCamera = Instance.new("Camera")
 local editor = player.PlayerGui:WaitForChild("EditAvatar")
-local itemTemplate = editor.Main.Background.Items.Template:Clone()
+local itemTemplate = editor.Main.MainFrame.Items.Template:Clone()
 
--- if not in limits, it's 3
-local customLimits = {
-	Head = 1,
-	Shirt = 1,
-	Pants = 1,
-	Face = 1,
-	Torso = 1,
-	LeftArm = 1,
-	LeftLeg = 1,
-	RightArm = 1,
-	RightLeg = 1,
-	GraphicTShirt = 1,
-}
+local resetDescription = ReplicatedStorage.Remotes.ResetDescription
+local applyDescription = ReplicatedStorage.Remotes.ApplyDescription
 
-local accessoryBlobCategories = {
-	ShoulderAccessory = true,
-	JacketAccessory = true,
-	SweaterAccessory = true,
-	ShirtAccessory = true,
-	TShirtAccessory = true,
-	DressSkirtAccessory = true,
-	PantsAccessory = true,
-	ShortsAccessory = true,
-	LeftShoeAccessory = true,
-	RightShoeAccessory = true,
-}
-
-local function getAdjustedCameraAngle(angle: Vector2)
-	return CFrame.Angles(0, math.rad(angle.X), 0)
-		* CFrame.Angles(0, math.rad(angle.Y), 0)
-		* CFrame.Angles(0, math.pi, 0)
-		* CFrame.new(Vector3.new(0, 0, 6))
+local function serializeHumanoidDescription(description: HumanoidDescription)
+	return {
+		Accessories = description:GetAccessories(false),
+		Animations = {
+			ClimbAnimation = description.ClimbAnimation,
+			FallAnimation = description.FallAnimation,
+			IdleAnimation = description.IdleAnimation,
+			JumpAnimation = description.JumpAnimation,
+			MoodAnimation = description.MoodAnimation,
+			RunAnimation = description.RunAnimation,
+			SwimAnimation = description.SwimAnimation,
+			WalkAnimation = description.WalkAnimation,
+		},
+		Scales = {
+			HeightScale = description.HeightScale,
+			WidthScale = description.WidthScale,
+			HeadScale = description.HeadScale,
+			BodyTypeScale = description.BodyTypeScale,
+			ProportionScale = description.ProportionScale,
+		},
+		Colors = {
+			HeadColor = { description.HeadColor.R, description.HeadColor.G, description.HeadColor.B },
+			LeftArmColor = { description.LeftArmColor.R, description.LeftArmColor.G, description.LeftArmColor.B },
+			LeftLegColor = { description.LeftLegColor.R, description.LeftLegColor.G, description.LeftLegColor.B },
+			RightArmColor = { description.RightArmColor.R, description.RightArmColor.G, description.RightArmColor.B },
+			RightLegColor = { description.RightLegColor.R, description.RightLegColor.G, description.RightLegColor.B },
+			TorsoColor = { description.TorsoColor.R, description.TorsoColor.G, description.TorsoColor.B },
+		},
+		BodyParts = {
+			Face = description.Face,
+			Head = description.Head,
+			LeftArm = description.LeftArm,
+			LeftLeg = description.LeftLeg,
+			RightArm = description.RightArm,
+			RightLeg = description.RightLeg,
+			Torso = description.Torso,
+		},
+		GraphicTShirt = description.GraphicTShirt,
+		Shirt = description.Shirt,
+		Pants = description.Pants,
+	}
 end
 
-local function checkIfInputInFrame(input: InputObject, frame: Frame)
-	return input.Position.X > frame.AbsolutePosition.X
-		and input.Position.X < (frame.AbsolutePosition.X + frame.AbsoluteSize.X)
-		and input.Position.Y > frame.AbsolutePosition.Y
-		and input.Position.Y < (frame.AbsolutePosition.Y + frame.AbsoluteSize.Y)
-end
-
-local function clearDisplay()
-	editor.Main.Background.Search.Text = ""
-	for _, itemDisplay in ipairs(editor.Main.Background.Items:GetChildren()) do
+local function clearDisplayFrame(frame: ScrollingFrame)
+	for _, itemDisplay in ipairs(frame:GetChildren()) do
 		if itemDisplay:IsA("ImageLabel") then
 			itemDisplay:Destroy()
 		end
 	end
+end
+
+local function closeAllFrames()
+	for _, element in ipairs(editor.Main:GetChildren()) do
+		if element.Name:match("Frame") then
+			element.Visible = false
+		end
+	end
+end
+
+local function resetUI()
+	clearDisplayFrame(editor.Main.MainFrame.Items)
+	clearDisplayFrame(editor.Main.BundleFrame.Items)
+	clearDisplayFrame(editor.Main.WearingFrame.Items)
+	clearDisplayFrame(editor.Main.OutfitsFrame.Items)
+
+	closeAllFrames()
+
+	editor.Main.AccessoryFrame.Visible = true
+	editor.Main.MainFrame.Visible = true
+	editor.Main.MainFrame.Search.Text = ""
 end
 
 local function getItemIndex(list: { { [string]: any } }, itemId: number): number?
@@ -76,7 +100,7 @@ end
 
 local function fixOrderFromIndex(list: { { [string]: any } }, index: number)
 	for i = index, #list do
-		list[i].Order -= 1
+		list[i].Order = i
 	end
 end
 
@@ -90,7 +114,7 @@ local function countAccessoriesOfType(list: { { [string]: any } }, accessoryType
 	return count
 end
 
-local function displayResults(results: CatalogPages)
+local function displayResultsInFrame(results: CatalogPages, frame: ScrollingFrame)
 	local page = results:GetCurrentPage()
 
 	for _, item in ipairs(page) do
@@ -99,57 +123,26 @@ local function displayResults(results: CatalogPages)
 		itemDisplay.Item.Image = `http://www.roblox.com/Thumbs/Asset.ashx?width=110&height=110&assetId={item.Id}`
 
 		itemDisplay.Item.Activated:Connect(function()
-			if accessoryBlobCategories[currentCategory] then
-				local accessories = table.clone(currentDescription:GetAccessories(false))
-				local itemIndex = getItemIndex(accessories, item.Id)
+			local accessories = table.clone(currentDescription:GetAccessories(false))
+			local itemIndex = getItemIndex(accessories, item.Id)
 
-				if itemIndex then
-					table.remove(accessories, itemIndex)
-					fixOrderFromIndex(accessories, itemIndex)
-				elseif
-					countAccessoriesOfType(accessories, Enum.AvatarAssetType[currentCategory] :: Enum.AvatarAssetType)
-					< 4
-				then
-					table.insert(accessories, {
-						AssetId = item.Id,
-						IsLayered = true,
-						AccessoryType = Enum.AccessoryType[currentCategory:gsub("Accessory", "")],
-						Order = #accessories + 1,
-					})
-				end
-				print(accessories)
-
-				currentDescription:SetAccessories(accessories, false)
-				currentHumanoid:ApplyDescription(currentDescription)
-				return
+			if itemIndex then
+				table.remove(accessories, itemIndex)
+				fixOrderFromIndex(accessories, itemIndex)
+			elseif #accessories < accessoryLimit then
+				table.insert(accessories, {
+					AssetId = item.Id,
+					IsLayered = true,
+					AccessoryType = Enum.AccessoryType[currentCategory:gsub("Accessory", "")],
+					Order = #accessories + 1,
+				})
 			end
 
-			if customLimits[currentCategory] == 1 then
-				if currentDescription[currentCategory] == item.Id then
-					currentDescription[currentCategory] = nil
-				elseif not currentDescription[currentCategory] then
-					currentDescription[currentCategory] = item.Id
-				end
-				currentHumanoid:ApplyDescription(currentDescription)
-				return
-			end
-
-			local descriptionIndex = currentCategory
-
-			if descriptionIndex == "Hat" then
-				descriptionIndex = "HatAccessory"
-			end
-
-			local _, commaCount = currentDescription[descriptionIndex]:gsub(",", "")
-			if currentDescription[descriptionIndex]:match(tostring(item.Id)) then
-				currentDescription[descriptionIndex] = currentDescription[descriptionIndex]:gsub(`,?{item.Id}`, "")
-			elseif commaCount < 2 then
-				currentDescription[descriptionIndex] = `{currentDescription[descriptionIndex]},{item.Id}`
-			end
-			currentHumanoid:ApplyDescription(currentDescription)
+			currentDescription:SetAccessories(accessories, false)
+			applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
 		end)
 
-		itemDisplay.Parent = editor.Main.Background.Items
+		itemDisplay.Parent = frame
 	end
 end
 
@@ -173,95 +166,68 @@ local function openCategory(categoryName: string)
 		return
 	end
 	currentCategory = categoryName
-	clearDisplay()
 
-	displayResults(search())
+	clearDisplayFrame(editor.Main.MainFrame.Items)
+	displayResultsInFrame(search(), editor.Main.MainFrame.Items)
+end
+
+local function handleCategoryButton(button: GuiBase, obliterator: typeof(Janitor.new()))
+	if not button:IsA("GuiButton") then
+		return
+	end
+	obliterator:Add(button.Activated:Connect(function()
+		openCategory(button.Name)
+	end))
 end
 
 local function openEditor(obliterator: typeof(Janitor.new()))
 	editor.Enabled = true
-	player.Character.Archivable = true
 
-	local angle = Vector2.new()
-	local dragging = false
-	local displayCharacter = player.Character:Clone()
+	currentDescription = player.Character.Humanoid:GetAppliedDescription()
 
-	obliterator:Add(displayCharacter)
+	resetUI()
 
-	currentHumanoid = displayCharacter.Humanoid
-	currentDescription = displayCharacter.Humanoid:GetAppliedDescription()
-	displayCharacter.Parent = editor.Main.Character.WorldModel
-	editorCamera.CFrame = displayCharacter.Humanoid.RootPart.CFrame * getAdjustedCameraAngle(Vector2.new())
+	for _, button in ipairs(editor.Main.AccessoryFrame:GetChildren()) do
+		handleCategoryButton(button, obliterator)
+	end
 
-	openCategory("Hat")
+	for _, button in ipairs(editor.Main.ShirtFrame:GetChildren()) do
+		handleCategoryButton(button, obliterator)
+	end
 
-	obliterator:Add(UserInputService.InputBegan:Connect(function(input, processed)
-		if processed or not checkIfInputInFrame(input, editor.Main.Character) then
-			return
-		end
-
-		if
-			input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch
-		then
-			dragging = true
-
-			local startAngle = angle
-			local startPosition = UserInputService:GetMouseLocation()
-
-			while dragging do
-				angle = startAngle + (startPosition - UserInputService:GetMouseLocation())
-				editorCamera.CFrame = displayCharacter.Humanoid.RootPart.CFrame * getAdjustedCameraAngle(angle)
-				task.wait()
-			end
-		end
-	end))
-
-	obliterator:Add(UserInputService.InputEnded:Connect(function(input, processed)
-		if processed then
-			return
-		end
-		if
-			input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch
-		then
-			dragging = false
-		end
-	end))
-
-	obliterator:Add(function()
-		dragging = false
-		clearDisplay()
-	end, true)
-
-	obliterator:Add(editor.Main.Background.Search.FocusLost:Connect(function(enterPressed)
-		if not enterPressed then
-			return
-		end
+	obliterator:Add(editor.Main.Reset.Activated:Connect(function()
+		resetDescription:FireServer()
 	end))
 
 	for _, button in ipairs(editor.Main:GetChildren()) do
-		if not button:IsA("ImageButton") then
+		if not button:IsA("GuiButton") then
 			continue
 		end
 
+		local frame = editor.Main:FindFirstChild(`{button.Name}Frame`)
+
 		obliterator:Add(button.Activated:Connect(function()
-			openCategory(button.Name)
+			if frame then
+				closeAllFrames()
+				frame.Visible = true
+
+				if button.Name == "Accessory" or button.Name == "Shirt" or button.Name == "Pants" then
+					editor.Main.MainFrame.Visible = true
+				end
+				return
+			end
 		end))
 	end
 end
 
 local function closeEditor(obliterator: typeof(Janitor.new()))
 	obliterator:Cleanup()
-	player.Character.Archivable = false
+	-- player.Character.Archivable = false
 	editor.Enabled = false
 end
 
 local function main()
 	local obliterator = Janitor.new()
-
-	clearDisplay()
-	editor.Main.Character.CurrentCamera = editorCamera
 
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if processed or input.KeyCode ~= Enum.KeyCode.P then
