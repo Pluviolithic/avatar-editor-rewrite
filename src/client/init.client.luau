@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
 local UserInputService = game:GetService("UserInputService")
 local AvatarEditorService = game:GetService("AvatarEditorService")
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -6,11 +7,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Janitor = require(ReplicatedStorage.Common.lib.Janitor)
 
+local currentResults = nil
 local accessoryLimit = 15
 local currentCategory = ""
 local currentDescription = nil
+local scrollingRefreshDebounce = false
 
 local player = Players.LocalPlayer
+local mainDisplayFrameObliterator = Janitor.new()
 local editor = player.PlayerGui:WaitForChild("EditAvatar")
 local itemTemplate = editor.Main.MainFrame.Items.Template:Clone()
 
@@ -77,7 +81,8 @@ local function closeAllFrames()
 end
 
 local function resetUI()
-	clearDisplayFrame(editor.Main.MainFrame.Items)
+	mainDisplayFrameObliterator:Cleanup()
+
 	clearDisplayFrame(editor.Main.BundleFrame.Items)
 	clearDisplayFrame(editor.Main.WearingFrame.Items)
 	clearDisplayFrame(editor.Main.OutfitsFrame.Items)
@@ -114,8 +119,8 @@ local function countAccessoriesOfType(list: { { [string]: any } }, accessoryType
 	return count
 end
 
-local function displayResultsInFrame(results: CatalogPages, frame: ScrollingFrame)
-	local page = results:GetCurrentPage()
+local function displayResultsInFrame(frame: ScrollingFrame)
+	local page = currentResults:GetCurrentPage()
 
 	for _, item in ipairs(page) do
 		local itemDisplay = itemTemplate:Clone()
@@ -142,6 +147,7 @@ local function displayResultsInFrame(results: CatalogPages, frame: ScrollingFram
 			applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
 		end)
 
+		mainDisplayFrameObliterator:Add(itemDisplay)
 		itemDisplay.Parent = frame
 	end
 end
@@ -167,8 +173,34 @@ local function openCategory(categoryName: string)
 	end
 	currentCategory = categoryName
 
-	clearDisplayFrame(editor.Main.MainFrame.Items)
-	displayResultsInFrame(search(), editor.Main.MainFrame.Items)
+	local scrollingFrame = editor.Main.MainFrame.Items
+
+	mainDisplayFrameObliterator:Cleanup()
+	currentResults = search()
+	displayResultsInFrame(scrollingFrame)
+
+	mainDisplayFrameObliterator:Add(function()
+		scrollingFrame.CanvasPosition = Vector2.new(0, 0)
+	end, true)
+
+	mainDisplayFrameObliterator:Add(
+		editor.Main.MainFrame.Items:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+			if
+				scrollingFrame.AbsoluteWindowSize.Y * scrollingFrame.CanvasSize.Y.Scale
+						+ scrollingFrame.CanvasPosition.Y
+					>= scrollingFrame.AbsoluteCanvasSize.Y - 0.1
+				and not scrollingRefreshDebounce
+			then
+				scrollingRefreshDebounce = true
+
+				currentResults:AdvanceToNextPageAsync()
+				displayResultsInFrame(scrollingFrame)
+
+				task.wait(0.5)
+				scrollingRefreshDebounce = false
+			end
+		end)
+	)
 end
 
 local function handleCategoryButton(button: GuiBase, obliterator: typeof(Janitor.new()))
@@ -181,6 +213,7 @@ local function handleCategoryButton(button: GuiBase, obliterator: typeof(Janitor
 end
 
 local function openEditor(obliterator: typeof(Janitor.new()))
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
 	editor.Enabled = true
 
 	currentDescription = player.Character.Humanoid:GetAppliedDescription()
@@ -196,6 +229,7 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 	end
 
 	obliterator:Add(editor.Main.Reset.Activated:Connect(function()
+		currentResults = nil
 		resetDescription:FireServer()
 	end))
 
@@ -221,6 +255,7 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 end
 
 local function closeEditor(obliterator: typeof(Janitor.new()))
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)
 	obliterator:Cleanup()
 	-- player.Character.Archivable = false
 	editor.Enabled = false
@@ -228,6 +263,8 @@ end
 
 local function main()
 	local obliterator = Janitor.new()
+
+	editor.Main.MainFrame.Items.Template:Destroy()
 
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if processed or input.KeyCode ~= Enum.KeyCode.P then
