@@ -10,7 +10,6 @@ local allOutfitData = {}
 local outfitDataStore = DataStoreService:GetDataStore("Outfits")
 
 local enumLookupTable = {
-	Enum.AccessoryType.Unknown,
 	Enum.AccessoryType.Hat,
 	Enum.AccessoryType.Hair,
 	Enum.AccessoryType.Face,
@@ -73,18 +72,34 @@ local function serializeHumanoidDescription(description: HumanoidDescription)
 	}
 end
 
+local function deepCopy(original)
+	local copy = {}
+
+	for k, v in pairs(original) do
+		if type(v) == "table" then
+			v = deepCopy(v)
+		end
+
+		copy[k] = v
+	end
+
+	return copy
+end
+
 local function serializeForDataStore(serializedHumanoidDescription)
-	for _, accessory in serializedHumanoidDescription.Accessories do
+	local serialized = deepCopy(serializedHumanoidDescription)
+	for _, accessory in serialized.Accessories do
 		accessory.AccessoryType = accessory.AccessoryType.Value
 	end
-	return serializedHumanoidDescription
+	return serialized
 end
 
 local function deserializeFromDataStore(serializedHumanoidDescription)
-	for _, accessory in serializedHumanoidDescription.Accessories do
+	local deserialized = deepCopy(serializedHumanoidDescription)
+	for _, accessory in deserialized.Accessories do
 		accessory.AccessoryType = enumLookupTable[accessory.AccessoryType]
 	end
-	return serializedHumanoidDescription
+	return deserialized
 end
 
 -- local function countIdsInString(IdString: string): number
@@ -93,33 +108,34 @@ end
 --
 
 local function deserializeHumanoidDescription(serializedHumanoidDescription: { [string]: any }): HumanoidDescription
+	local serialized = table.clone(serializedHumanoidDescription)
 	local description = Instance.new("HumanoidDescription")
 
-	for i = #serializedHumanoidDescription.Accessories, 16, -1 do
-		table.remove(serializedHumanoidDescription.Accessories)
+	for i = #serialized.Accessories, 16, -1 do
+		table.remove(serialized.Accessories)
 	end
 
-	description:SetAccessories(serializedHumanoidDescription.Accessories, true)
+	description:SetAccessories(serialized.Accessories, true)
 
-	for animationCategory, animationId in pairs(serializedHumanoidDescription.Animations) do
+	for animationCategory, animationId in pairs(serialized.Animations) do
 		description[animationCategory] = animationId
 	end
 
-	for scaleCategory, scale in pairs(serializedHumanoidDescription.Scales) do
+	for scaleCategory, scale in pairs(serialized.Scales) do
 		description[scaleCategory] = scale
 	end
 
-	for colorCategory, color in pairs(serializedHumanoidDescription.Colors) do
+	for colorCategory, color in pairs(serialized.Colors) do
 		description[colorCategory] = Color3.new(table.unpack(color))
 	end
 
-	for bodyPartCategory, bodyPartId in pairs(serializedHumanoidDescription.BodyParts) do
+	for bodyPartCategory, bodyPartId in pairs(serialized.BodyParts) do
 		description[bodyPartCategory] = bodyPartId
 	end
 
-	description.GraphicTShirt = serializedHumanoidDescription.GraphicTShirt
-	description.Shirt = serializedHumanoidDescription.Shirt
-	description.Pants = serializedHumanoidDescription.Pants
+	description.GraphicTShirt = serialized.GraphicTShirt
+	description.Shirt = serialized.Shirt
+	description.Pants = serialized.Pants
 
 	return description
 end
@@ -139,7 +155,6 @@ local function onPlayerAdded(player: Player)
 	local humanoid = character:WaitForChild("Humanoid")
 
 	if outfitData then
-		print(outfitData)
 		if outfitData.CurrentOutfit then
 			humanoid:ApplyDescription(fullDeserialize(outfitData.CurrentOutfit))
 		end
@@ -172,7 +187,6 @@ saveDescription.OnServerEvent:Connect(function(player, serializedHumanoidDescrip
 
 	humanoid:ApplyDescription(deserializeHumanoidDescription(serializedHumanoidDescription))
 	allOutfitData[player.UserId].CurrentOutfit = serializeForDataStore(serializedHumanoidDescription)
-	print(allOutfitData)
 	outfitDataStore:SetAsync(`Key_{player.UserId}`, allOutfitData[player.UserId])
 end)
 

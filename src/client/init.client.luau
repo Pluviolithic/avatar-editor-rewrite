@@ -17,6 +17,7 @@ local scrollingRefreshDebounce = false
 
 local player = Players.LocalPlayer
 local slotsObliterator = Janitor.new()
+local wearingObliterator = Janitor.new()
 local mainDisplayFrameObliterator = Janitor.new()
 local editor = player.PlayerGui:WaitForChild("EditAvatar")
 
@@ -166,17 +167,18 @@ local function fixOrderFromIndex(list: { { [string]: any } }, index: number)
 	end
 end
 
-local function countAccessoriesOfType(list: { { [string]: any } }, accessoryType: Enum.AvatarAssetType)
-	local count = 0
-	for _, accessory in ipairs(list) do
-		if accessory.AccessoryType == accessoryType then
-			count += 1
-		end
-	end
-	return count
-end
+-- local function countAccessoriesOfType(list: { { [string]: any } }, accessoryType: Enum.AvatarAssetType)
+-- 	local count = 0
+-- 	for _, accessory in ipairs(list) do
+-- 		if accessory.AccessoryType == accessoryType then
+-- 			count += 1
+-- 		end
+-- 	end
+-- 	return count
+-- end
+--
 
-local function unequipAccessory(description: HumanoidDescription, itemId: number)
+local function unequipItem(description: HumanoidDescription, itemId: number)
 	local accessories = description:GetAccessories(true)
 	local slotDisplay = editor.Main.Slots:FindFirstChild(itemId)
 	local itemDisplay = editor.Main.MainFrame.Items:FindFirstChild(itemId)
@@ -191,8 +193,10 @@ local function unequipAccessory(description: HumanoidDescription, itemId: number
 			description.Pants = 0
 		elseif description.Shirt == itemId then
 			description.Shirt = 0
-		else
+		elseif description.GraphicTShirt == itemId then
 			description.GraphicTShirt = 0
+		elseif description.Face == itemId then
+			description.Face = 0
 		end
 	end
 
@@ -220,7 +224,7 @@ local function createSlotForItem(itemId: number)
 	slotsObliterator:Add(slotDisplay)
 
 	slotDisplay.Item.Activated:Connect(function()
-		unequipAccessory(currentDescription, itemId)
+		unequipItem(currentDescription, itemId)
 	end)
 end
 
@@ -249,6 +253,45 @@ local function getMapOfEquippedItemsFromCategory(category: string, description: 
 	end
 
 	return map
+end
+
+local function getAllEquippedItems(description: HumanoidDescription)
+	local list = description:GetAccessories(true)
+
+	if description.Pants > 0 then
+		table.insert(list, { AssetId = description.Pants })
+	end
+
+	if description.Shirt > 0 then
+		table.insert(list, { AssetId = description.Shirt })
+	end
+
+	if description.GraphicTShirt > 0 then
+		table.insert(list, { AssetId = description.GraphicTShirt })
+	end
+
+	if description.Face > 0 then
+		table.insert(list, { AssetId = description.Face })
+	end
+
+	return list
+end
+
+local function displayCurrentlyWearing()
+	for _, item in ipairs(getAllEquippedItems(currentDescription)) do
+		local itemDisplay = itemTemplate:Clone()
+
+		itemDisplay.Name = item.AssetId
+		itemDisplay.Item.Image = `http://www.roblox.com/Thumbs/Asset.ashx?width=110&height=110&assetId={item.AssetId}`
+
+		itemDisplay.Item.Activated:Connect(function()
+			unequipItem(currentDescription, item.AssetId)
+			itemDisplay:Destroy()
+		end)
+
+		itemDisplay.Parent = editor.Main.WearingFrame.Items
+		wearingObliterator:Add(itemDisplay)
+	end
 end
 
 local function displayResultsInFrame(frame: ScrollingFrame)
@@ -288,7 +331,7 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 			local itemIndex = getItemIndex(accessories, item.Id)
 
 			if itemIndex then
-				unequipAccessory(currentDescription, item.Id)
+				unequipItem(currentDescription, item.Id)
 				return
 			elseif #accessories < accessoryLimit then
 				table.insert(accessories, {
@@ -453,6 +496,7 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 
 				if button.Name == "Wearing" then
 					editor.Main.WearingFrame.Visible = true
+					displayCurrentlyWearing()
 				else
 					editor.Main.MainFrame.Visible = true
 				end
