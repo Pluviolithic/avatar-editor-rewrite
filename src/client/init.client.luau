@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Janitor = require(ReplicatedStorage.Common.lib.Janitor)
 
+local currentPage = 0
 local currentResults = nil
 local accessoryLimit = 15
 local currentCategory = ""
@@ -14,6 +15,7 @@ local currentDescription = nil
 local scrollingRefreshDebounce = false
 
 local player = Players.LocalPlayer
+local slotsObliterator = Janitor.new()
 local mainDisplayFrameObliterator = Janitor.new()
 local editor = player.PlayerGui:WaitForChild("EditAvatar")
 
@@ -23,30 +25,44 @@ local itemTemplate = editor.Main.MainFrame.Items.Template:Clone()
 local resetDescription = ReplicatedStorage.Remotes.ResetDescription
 local applyDescription = ReplicatedStorage.Remotes.ApplyDescription
 
-local nonBlobAccessories = {
-	BackAccessory = true,
-	FaceAccessory = true,
-	FrontAccessory = true,
-	HairAccessory = true,
-	HatAccessory = true,
-	NeckAccessory = true,
-	ShouldersAccessory = true,
-	WaistAccessory = true,
+local accessoryTypeRemaps = {
+	["3DDress"] = Enum.AccessoryType.DressSkirt,
+	["3DLeftShoe"] = Enum.AccessoryType.LeftShoe,
+	["3DPants"] = Enum.AccessoryType.Pants,
+	["3DRightShoe"] = Enum.AccessoryType.RightShoe,
+	["3DShorts"] = Enum.AccessoryType.Shorts,
+
+	["3DJacket"] = Enum.AccessoryType.Jacket,
+	["3DShirt"] = Enum.AccessoryType.Shirt,
+	["3DSweater"] = Enum.AccessoryType.Sweater,
+	["3DTShirt"] = Enum.AccessoryType.TShirt,
+
+	["BackAccessory"] = Enum.AccessoryType.Back,
+	["FaceAccessory"] = Enum.AccessoryType.Face,
+	["FrontAccessory"] = Enum.AccessoryType.Front,
+	["HairAccessory"] = Enum.AccessoryType.Hair,
+	["HatAccessory"] = Enum.AccessoryType.Hat,
+	["NeckAccessory"] = Enum.AccessoryType.Neck,
+	["ShouldersAccessory"] = Enum.AccessoryType.Shoulder,
+	["WaistAccessory"] = Enum.AccessoryType.Waist,
+}
+
+local avatarAssetTypeRemaps = {
+	["3DDress"] = Enum.AvatarAssetType.DressSkirtAccessory,
+	["3DLeftShoe"] = Enum.AvatarAssetType.LeftShoeAccessory,
+	["3DPants"] = Enum.AvatarAssetType.PantsAccessory,
+	["3DRightShoe"] = Enum.AvatarAssetType.RightShoeAccessory,
+	["3DShorts"] = Enum.AvatarAssetType.ShortsAccessory,
+
+	["3DJacket"] = Enum.AvatarAssetType.JacketAccessory,
+	["3DShirt"] = Enum.AvatarAssetType.ShirtAccessory,
+	["3DSweater"] = Enum.AvatarAssetType.SweaterAccessory,
+	["3DTShirt"] = Enum.AvatarAssetType.TShirtAccessory,
 }
 
 local function serializeHumanoidDescription(description: HumanoidDescription)
 	return {
-		AccessoryBlobData = description:GetAccessories(false),
-		Accessories = {
-			BackAccessory = description.BackAccessory,
-			FaceAccessory = description.FaceAccessory,
-			FrontAccessory = description.FrontAccessory,
-			HairAccessory = description.HairAccessory,
-			HatAccessory = description.NeckAccessory,
-			NeckAccessory = description.NeckAccessory,
-			ShouldersAccessory = description.ShouldersAccessory,
-			WaistAccessory = description.WaistAccessory,
-		},
+		Accessories = description:GetAccessories(true),
 		Animations = {
 			ClimbAnimation = description.ClimbAnimation,
 			FallAnimation = description.FallAnimation,
@@ -104,6 +120,7 @@ local function closeAllFrames()
 end
 
 local function resetUI()
+	slotsObliterator:Cleanup()
 	mainDisplayFrameObliterator:Cleanup()
 
 	clearDisplayFrame(editor.Main.BundleFrame.Items)
@@ -111,6 +128,9 @@ local function resetUI()
 	clearDisplayFrame(editor.Main.OutfitsFrame.Items)
 
 	closeAllFrames()
+
+	currentPage = 0
+	currentResults = nil
 
 	editor.Main.AccessoryFrame.Visible = true
 	editor.Main.MainFrame.Visible = true
@@ -127,7 +147,7 @@ local function getItemIndex(list: { { [string]: any } }, itemId: number): number
 end
 
 local function hasItemEquipped(description: HumanoidDescription, itemId: number): boolean
-	if getItemIndex(description:GetAccessories(false), itemId) then
+	if getItemIndex(description:GetAccessories(true), itemId) then
 		return true
 	end
 
@@ -138,7 +158,9 @@ end
 
 local function fixOrderFromIndex(list: { { [string]: any } }, index: number)
 	for i = index, #list do
-		list[i].Order = i
+		if list[i].Order then
+			list[i].Order -= 1
+		end
 	end
 end
 
@@ -152,16 +174,88 @@ local function countAccessoriesOfType(list: { { [string]: any } }, accessoryType
 	return count
 end
 
+local function unequipAccessory(accessories: { { [string]: any } }, itemId: number)
+	local slotDisplay = editor.Main.Slots:FindFirstChild(itemId)
+	local itemDisplay = editor.Main.MainFrame.Items:FindFirstChild(itemId)
+	local itemIndex = getItemIndex(accessories, itemId)
+
+	table.remove(accessories, itemIndex)
+	fixOrderFromIndex(accessories, itemIndex)
+
+	if slotDisplay then
+		slotDisplay:Destroy()
+	end
+
+	if itemDisplay then
+		itemDisplay.Equipped.Visible = false
+	end
+
+	currentDescription:SetAccessories(accessories, true)
+	applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
+end
+
+local function createSlotForItem(itemId: number)
+	if editor.Main.Slots:FindFirstChild(itemId) then
+		return
+	end
+
+	local slotDisplay = slotTemplate:Clone()
+
+	slotDisplay.Item.Image = `http://www.roblox.com/Thumbs/Asset.ashx?width=110&height=110&assetId={itemId}`
+	slotDisplay.Name = itemId
+	slotDisplay.Parent = editor.Main.Slots
+	slotsObliterator:Add(slotDisplay)
+
+	slotDisplay.Item.Activated:Connect(function()
+		unequipAccessory(currentDescription:GetAccessories(true), itemId)
+	end)
+end
+
+local function getMapOfEquippedItemsFromCategory(category: string, description: HumanoidDescription)
+	if category == "Pants" or category == "Shirt" or category == "GraphicTShirt" then
+		return { [description[category]] = true }
+	end
+
+	local map = {}
+	if category:match("Accessory") then
+		if description[category] == "" then
+			return map
+		end
+
+		for _, stringId in ipairs((description[category] :: string):split(",")) do
+			map[tonumber(stringId)] = true
+		end
+
+		return map
+	end
+
+	for _, item in ipairs(description:GetAccessories(false)) do
+		if item.AccessoryType == accessoryTypeRemaps[category] then
+			map[item.AssetId] = true
+		end
+	end
+
+	print(map)
+
+	return map
+end
+
 local function displayResultsInFrame(frame: ScrollingFrame)
 	local page = currentResults:GetCurrentPage()
+	local missingSlots = getMapOfEquippedItemsFromCategory(currentCategory, currentDescription)
+
+	currentPage += 1
 
 	for _, item in ipairs(page) do
 		local itemDisplay = itemTemplate:Clone()
 
+		itemDisplay.Name = item.Id
 		itemDisplay.Item.Image = `http://www.roblox.com/Thumbs/Asset.ashx?width=110&height=110&assetId={item.Id}`
 
 		if hasItemEquipped(currentDescription, item.Id) then
 			itemDisplay.Equipped.Visible = true
+			createSlotForItem(item.Id)
+			missingSlots[item.Id] = nil
 		end
 
 		itemDisplay.Item.Activated:Connect(function()
@@ -169,35 +263,43 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 				return
 			end
 
-			local accessories = table.clone(currentDescription:GetAccessories(false))
+			local accessories = currentDescription:GetAccessories(true)
 			local itemIndex = getItemIndex(accessories, item.Id)
 
 			if itemIndex then
-				table.remove(accessories, itemIndex)
-				fixOrderFromIndex(accessories, itemIndex)
+				unequipAccessory(accessories, item.Id)
 			elseif #accessories < accessoryLimit then
 				table.insert(accessories, {
 					AssetId = item.Id,
-					IsLayered = true,
-					AccessoryType = Enum.AccessoryType[currentCategory:gsub("Accessory", "")],
-					Order = #accessories + 1,
+					IsLayered = if accessoryTypeRemaps[currentCategory] then true else false,
+					AccessoryType = accessoryTypeRemaps[currentCategory] or Enum.AccessoryType[currentCategory],
+					Order = if accessoryTypeRemaps[currentCategory]
+						then #currentDescription:GetAccessories(false) + 1
+						else nil,
 				})
 				itemDisplay.Equipped.Visible = true
+				createSlotForItem(item.Id)
 			end
 
-			currentDescription:SetAccessories(accessories, false)
+			currentDescription:SetAccessories(accessories, true)
 			applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
 		end)
 
 		mainDisplayFrameObliterator:Add(itemDisplay)
 		itemDisplay.Parent = frame
 	end
+
+	if currentPage == 1 then
+		for itemId in pairs(missingSlots) do
+			createSlotForItem(itemId)
+		end
+	end
 end
 
 local function search(text: string?): CatalogPages
 	local searchParameters = CatalogSearchParams.new()
 
-	searchParameters.AssetTypes = { Enum.AvatarAssetType[currentCategory] }
+	searchParameters.AssetTypes = { avatarAssetTypeRemaps[currentCategory] or Enum.AvatarAssetType[currentCategory] }
 	if text then
 		searchParameters.SearchKeyword = text
 	end
@@ -222,6 +324,8 @@ local function openCategory(categoryName: string)
 	displayResultsInFrame(scrollingFrame)
 
 	mainDisplayFrameObliterator:Add(function()
+		currentPage = 0
+		currentResults = nil
 		scrollingFrame.CanvasPosition = Vector2.new(0, 0)
 	end, true)
 
@@ -271,8 +375,9 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 	end
 
 	obliterator:Add(editor.Main.Reset.Activated:Connect(function()
-		currentResults = nil
+		resetUI()
 		resetDescription:FireServer()
+		currentDescription = Players:GetHumanoidDescriptionFromUserId(player.UserId)
 	end))
 
 	for _, button in ipairs(editor.Main:GetChildren()) do

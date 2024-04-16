@@ -6,17 +6,7 @@ local applyDescription = ReplicatedStorage.Remotes.ApplyDescription
 
 local function serializeHumanoidDescription(description: HumanoidDescription)
 	return {
-		AccessoryBlobData = description:GetAccessories(false),
-		Accessories = {
-			BackAccessory = description.BackAccessory,
-			FaceAccessory = description.FaceAccessory,
-			FrontAccessory = description.FrontAccessory,
-			HairAccessory = description.HairAccessory,
-			HatAccessory = description.NeckAccessory,
-			NeckAccessory = description.NeckAccessory,
-			ShouldersAccessory = description.ShouldersAccessory,
-			WaistAccessory = description.WaistAccessory,
-		},
+		Accessories = description:GetAccessories(true),
 		Animations = {
 			ClimbAnimation = description.ClimbAnimation,
 			FallAnimation = description.FallAnimation,
@@ -62,16 +52,13 @@ local function countIdsInString(IdString: string): number
 end
 
 local function deserializeHumanoidDescription(serializedHumanoidDescription: { [string]: any }): HumanoidDescription
-	local itemCount = 0
 	local description = Instance.new("HumanoidDescription")
 
-	description:SetAccessories(serializedHumanoidDescription.AccessoryBlobData, false)
-	itemCount += #serializedHumanoidDescription.AccessoryBlobData
-
-	for accessoryCategory, accessoryIds in pairs(serializedHumanoidDescription.Accessories) do
-		description[accessoryCategory] = accessoryIds
-		itemCount += countIdsInString(accessoryIds)
+	for i = #serializedHumanoidDescription.Accessories, 16, -1 do
+		table.remove(serializedHumanoidDescription.Accessories)
 	end
+
+	description:SetAccessories(serializedHumanoidDescription.Accessories, true)
 
 	for animationCategory, animationId in pairs(serializedHumanoidDescription.Animations) do
 		description[animationCategory] = animationId
@@ -92,10 +79,6 @@ local function deserializeHumanoidDescription(serializedHumanoidDescription: { [
 	description.GraphicTShirt = serializedHumanoidDescription.GraphicTShirt
 	description.Shirt = serializedHumanoidDescription.Shirt
 	description.Pants = serializedHumanoidDescription.Pants
-
-	if itemCount > 15 then
-		error("Attempted to apply too many items.")
-	end
 
 	return description
 end
