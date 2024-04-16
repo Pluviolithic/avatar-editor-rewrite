@@ -16,14 +16,37 @@ local scrollingRefreshDebounce = false
 local player = Players.LocalPlayer
 local mainDisplayFrameObliterator = Janitor.new()
 local editor = player.PlayerGui:WaitForChild("EditAvatar")
+
+local slotTemplate = editor.Main.Slots.Template:Clone()
 local itemTemplate = editor.Main.MainFrame.Items.Template:Clone()
 
 local resetDescription = ReplicatedStorage.Remotes.ResetDescription
 local applyDescription = ReplicatedStorage.Remotes.ApplyDescription
 
+local nonBlobAccessories = {
+	BackAccessory = true,
+	FaceAccessory = true,
+	FrontAccessory = true,
+	HairAccessory = true,
+	HatAccessory = true,
+	NeckAccessory = true,
+	ShouldersAccessory = true,
+	WaistAccessory = true,
+}
+
 local function serializeHumanoidDescription(description: HumanoidDescription)
 	return {
-		Accessories = description:GetAccessories(false),
+		AccessoryBlobData = description:GetAccessories(false),
+		Accessories = {
+			BackAccessory = description.BackAccessory,
+			FaceAccessory = description.FaceAccessory,
+			FrontAccessory = description.FrontAccessory,
+			HairAccessory = description.HairAccessory,
+			HatAccessory = description.NeckAccessory,
+			NeckAccessory = description.NeckAccessory,
+			ShouldersAccessory = description.ShouldersAccessory,
+			WaistAccessory = description.WaistAccessory,
+		},
 		Animations = {
 			ClimbAnimation = description.ClimbAnimation,
 			FallAnimation = description.FallAnimation,
@@ -103,6 +126,16 @@ local function getItemIndex(list: { { [string]: any } }, itemId: number): number
 	return nil
 end
 
+local function hasItemEquipped(description: HumanoidDescription, itemId: number): boolean
+	if getItemIndex(description:GetAccessories(false), itemId) then
+		return true
+	end
+
+	return tonumber(description.Pants) == itemId
+		or tonumber(description.Shirt) == itemId
+		or tonumber(description.GraphicTShirt) == itemId
+end
+
 local function fixOrderFromIndex(list: { { [string]: any } }, index: number)
 	for i = index, #list do
 		list[i].Order = i
@@ -127,7 +160,15 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 
 		itemDisplay.Item.Image = `http://www.roblox.com/Thumbs/Asset.ashx?width=110&height=110&assetId={item.Id}`
 
+		if hasItemEquipped(currentDescription, item.Id) then
+			itemDisplay.Equipped.Visible = true
+		end
+
 		itemDisplay.Item.Activated:Connect(function()
+			if currentCategory == "Shirt" or currentCategory == "Pants" or currentCategory == "GraphicTShirt" then
+				return
+			end
+
 			local accessories = table.clone(currentDescription:GetAccessories(false))
 			local itemIndex = getItemIndex(accessories, item.Id)
 
@@ -141,6 +182,7 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 					AccessoryType = Enum.AccessoryType[currentCategory:gsub("Accessory", "")],
 					Order = #accessories + 1,
 				})
+				itemDisplay.Equipped.Visible = true
 			end
 
 			currentDescription:SetAccessories(accessories, false)
@@ -264,6 +306,7 @@ end
 local function main()
 	local obliterator = Janitor.new()
 
+	editor.Main.Slots.Template:Destroy()
 	editor.Main.MainFrame.Items.Template:Destroy()
 
 	UserInputService.InputBegan:Connect(function(input, processed)
