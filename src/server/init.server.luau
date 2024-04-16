@@ -1,8 +1,34 @@
 local Players = game:GetService("Players")
+local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local saveDescription = ReplicatedStorage.Remotes.SaveDescription
 local resetDescription = ReplicatedStorage.Remotes.ResetDescription
 local applyDescription = ReplicatedStorage.Remotes.ApplyDescription
+
+local allOutfitData = {}
+local outfitDataStore = DataStoreService:GetDataStore("Outfits")
+
+local enumLookupTable = {
+	Enum.AccessoryType.Unknown,
+	Enum.AccessoryType.Hat,
+	Enum.AccessoryType.Hair,
+	Enum.AccessoryType.Face,
+	Enum.AccessoryType.Neck,
+	Enum.AccessoryType.Shoulder,
+	Enum.AccessoryType.Front,
+	Enum.AccessoryType.Back,
+	Enum.AccessoryType.Waist,
+	Enum.AccessoryType.TShirt,
+	Enum.AccessoryType.Shirt,
+	Enum.AccessoryType.Pants,
+	Enum.AccessoryType.Jacket,
+	Enum.AccessoryType.Sweater,
+	Enum.AccessoryType.Shorts,
+	Enum.AccessoryType.LeftShoe,
+	Enum.AccessoryType.RightShoe,
+	Enum.AccessoryType.DressSkirt,
+}
 
 local function serializeHumanoidDescription(description: HumanoidDescription)
 	return {
@@ -47,9 +73,24 @@ local function serializeHumanoidDescription(description: HumanoidDescription)
 	}
 end
 
-local function countIdsInString(IdString: string): number
-	return #IdString:split(",")
+local function serializeForDataStore(serializedHumanoidDescription)
+	for _, accessory in serializedHumanoidDescription.Accessories do
+		accessory.AccessoryType = accessory.AccessoryType.Value
+	end
+	return serializedHumanoidDescription
 end
+
+local function deserializeFromDataStore(serializedHumanoidDescription)
+	for _, accessory in serializedHumanoidDescription.Accessories do
+		accessory.AccessoryType = enumLookupTable[accessory.AccessoryType]
+	end
+	return serializedHumanoidDescription
+end
+
+-- local function countIdsInString(IdString: string): number
+-- 	return #IdString:split(",")
+-- end
+--
 
 local function deserializeHumanoidDescription(serializedHumanoidDescription: { [string]: any }): HumanoidDescription
 	local description = Instance.new("HumanoidDescription")
@@ -83,6 +124,31 @@ local function deserializeHumanoidDescription(serializedHumanoidDescription: { [
 	return description
 end
 
+local function fullSerialize(description: HumanoidDescription)
+	return serializeForDataStore(serializeHumanoidDescription(description))
+end
+
+local function fullDeserialize(serializedHumanoidDescription)
+	return deserializeHumanoidDescription(deserializeFromDataStore(serializedHumanoidDescription))
+end
+
+local function onPlayerAdded(player: Player)
+	local outfitData = outfitDataStore:GetAsync(`Key_{player.UserId}`)
+
+	local character = player.Character or player.CharacterAdded:Wait()
+	local humanoid = character:WaitForChild("Humanoid")
+
+	if outfitData then
+		print(outfitData)
+		if outfitData.CurrentOutfit then
+			humanoid:ApplyDescription(fullDeserialize(outfitData.CurrentOutfit))
+		end
+		allOutfitData[player.UserId] = outfitData
+	else
+		allOutfitData[player.UserId] = {}
+	end
+end
+
 applyDescription.OnServerEvent:Connect(function(player, serializedHumanoidDescription)
 	local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
 
@@ -96,3 +162,27 @@ end)
 resetDescription.OnServerEvent:Connect(function(player)
 	player.Character.Humanoid:ApplyDescription(Players:GetHumanoidDescriptionFromUserId(player.UserId))
 end)
+
+saveDescription.OnServerEvent:Connect(function(player, serializedHumanoidDescription)
+	local humanoid = player.Character and player.Character:FindFirstChild("Humanoid")
+
+	if not humanoid then
+		return
+	end
+
+	humanoid:ApplyDescription(deserializeHumanoidDescription(serializedHumanoidDescription))
+	allOutfitData[player.UserId].CurrentOutfit = serializeForDataStore(serializedHumanoidDescription)
+	print(allOutfitData)
+	outfitDataStore:SetAsync(`Key_{player.UserId}`, allOutfitData[player.UserId])
+end)
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+
+Players.PlayerRemoving:Connect(function(player)
+	outfitDataStore:SetAsync(`Key_{player.UserId}`, allOutfitData[player.UserId])
+	allOutfitData[player.UserId] = nil
+end)
+
+for _, player in ipairs(Players:GetPlayers()) do
+	onPlayerAdded(player)
+end

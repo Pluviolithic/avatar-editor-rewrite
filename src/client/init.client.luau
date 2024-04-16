@@ -12,6 +12,7 @@ local currentResults = nil
 local accessoryLimit = 15
 local currentCategory = ""
 local currentDescription = nil
+local starterDescription = nil
 local scrollingRefreshDebounce = false
 
 local player = Players.LocalPlayer
@@ -22,6 +23,7 @@ local editor = player.PlayerGui:WaitForChild("EditAvatar")
 local slotTemplate = editor.Main.Slots.Template:Clone()
 local itemTemplate = editor.Main.MainFrame.Items.Template:Clone()
 
+local saveDescription = ReplicatedStorage.Remotes.SaveDescription
 local resetDescription = ReplicatedStorage.Remotes.ResetDescription
 local applyDescription = ReplicatedStorage.Remotes.ApplyDescription
 
@@ -174,13 +176,25 @@ local function countAccessoriesOfType(list: { { [string]: any } }, accessoryType
 	return count
 end
 
-local function unequipAccessory(accessories: { { [string]: any } }, itemId: number)
+local function unequipAccessory(description: HumanoidDescription, itemId: number)
+	local accessories = description:GetAccessories(true)
 	local slotDisplay = editor.Main.Slots:FindFirstChild(itemId)
 	local itemDisplay = editor.Main.MainFrame.Items:FindFirstChild(itemId)
 	local itemIndex = getItemIndex(accessories, itemId)
 
-	table.remove(accessories, itemIndex)
-	fixOrderFromIndex(accessories, itemIndex)
+	if itemIndex then
+		table.remove(accessories, itemIndex)
+		fixOrderFromIndex(accessories, itemIndex)
+		description:SetAccessories(accessories, true)
+	else
+		if description.Pants == itemId then
+			description.Pants = 0
+		elseif description.Shirt == itemId then
+			description.Shirt = 0
+		else
+			description.GraphicTShirt = 0
+		end
+	end
 
 	if slotDisplay then
 		slotDisplay:Destroy()
@@ -190,8 +204,7 @@ local function unequipAccessory(accessories: { { [string]: any } }, itemId: numb
 		itemDisplay.Equipped.Visible = false
 	end
 
-	currentDescription:SetAccessories(accessories, true)
-	applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
+	applyDescription:FireServer(serializeHumanoidDescription(description))
 end
 
 local function createSlotForItem(itemId: number)
@@ -207,7 +220,7 @@ local function createSlotForItem(itemId: number)
 	slotsObliterator:Add(slotDisplay)
 
 	slotDisplay.Item.Activated:Connect(function()
-		unequipAccessory(currentDescription:GetAccessories(true), itemId)
+		unequipAccessory(currentDescription, itemId)
 	end)
 end
 
@@ -235,8 +248,6 @@ local function getMapOfEquippedItemsFromCategory(category: string, description: 
 		end
 	end
 
-	print(map)
-
 	return map
 end
 
@@ -260,6 +271,16 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 
 		itemDisplay.Item.Activated:Connect(function()
 			if currentCategory == "Shirt" or currentCategory == "Pants" or currentCategory == "GraphicTShirt" then
+				slotsObliterator:Cleanup()
+				if hasItemEquipped(currentDescription, item.Id) then
+					currentDescription[currentCategory] = 0
+					itemDisplay.Equipped.Visible = false
+					return
+				end
+				createSlotForItem(item.Id)
+				itemDisplay.Equipped.Visible = true
+				currentDescription[currentCategory] = item.Id
+				applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
 				return
 			end
 
@@ -267,7 +288,8 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 			local itemIndex = getItemIndex(accessories, item.Id)
 
 			if itemIndex then
-				unequipAccessory(accessories, item.Id)
+				unequipAccessory(currentDescription, item.Id)
+				return
 			elseif #accessories < accessoryLimit then
 				table.insert(accessories, {
 					AssetId = item.Id,
@@ -299,15 +321,16 @@ end
 local function search(text: string?): CatalogPages
 	local searchParameters = CatalogSearchParams.new()
 
+	searchParameters.Limit = 60
 	searchParameters.AssetTypes = { avatarAssetTypeRemaps[currentCategory] or Enum.AvatarAssetType[currentCategory] }
 	if text then
 		searchParameters.SearchKeyword = text
 	end
 
-	if currentCategory == "LeftShoeAccessory" or currentCategory == "RightShoeAccessory" then
-		searchParameters.BundleTypes = { Enum.BundleType.Shoes }
-	end
-
+	-- if currentCategory == "LeftShoeAccessory" or currentCategory == "RightShoeAccessory" then
+	-- 	searchParameters.BundleTypes = { Enum.BundleType.Shoes }
+	-- end
+	--
 	return AvatarEditorService:SearchCatalog(searchParameters)
 end
 
@@ -319,6 +342,7 @@ local function openCategory(categoryName: string)
 
 	local scrollingFrame = editor.Main.MainFrame.Items
 
+	slotsObliterator:Cleanup()
 	mainDisplayFrameObliterator:Cleanup()
 	currentResults = search()
 	displayResultsInFrame(scrollingFrame)
@@ -342,7 +366,7 @@ local function openCategory(categoryName: string)
 				currentResults:AdvanceToNextPageAsync()
 				displayResultsInFrame(scrollingFrame)
 
-				task.wait(0.5)
+				task.wait(2)
 				scrollingRefreshDebounce = false
 			end
 		end)
@@ -358,11 +382,19 @@ local function handleCategoryButton(button: GuiBase, obliterator: typeof(Janitor
 	end))
 end
 
+local function closeEditor(obliterator: typeof(Janitor.new()))
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)
+	obliterator:Cleanup()
+	-- player.Character.Archivable = false
+	editor.Enabled = false
+end
+
 local function openEditor(obliterator: typeof(Janitor.new()))
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
 	editor.Enabled = true
 
 	currentDescription = player.Character.Humanoid:GetAppliedDescription()
+	starterDescription = currentDescription:Clone()
 
 	resetUI()
 
@@ -373,6 +405,29 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 	for _, button in ipairs(editor.Main.ShirtFrame:GetChildren()) do
 		handleCategoryButton(button, obliterator)
 	end
+
+	for _, button in ipairs(editor.Main.PantsFrame:GetChildren()) do
+		handleCategoryButton(button, obliterator)
+	end
+
+	obliterator:Add(editor.Main.Apply.Activated:Connect(function()
+		editor.Enabled = false
+		resetUI()
+		saveDescription:FireServer(serializeHumanoidDescription(currentDescription))
+	end))
+
+	obliterator:Add(editor.Main.WearingFrame.RemoveAll.Activated:Connect(function()
+		currentDescription.Shirt = 0
+		currentDescription.Pants = 0
+		currentDescription.GraphicTShirt = 0
+		currentDescription:SetAccessories({}, true)
+		applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
+	end))
+
+	obliterator:Add(editor.Main.Cancel.Activated:Connect(function()
+		applyDescription:FireServer(serializeHumanoidDescription(starterDescription))
+		closeEditor(obliterator)
+	end))
 
 	obliterator:Add(editor.Main.Reset.Activated:Connect(function()
 		resetUI()
@@ -388,24 +443,22 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 		local frame = editor.Main:FindFirstChild(`{button.Name}Frame`)
 
 		obliterator:Add(button.Activated:Connect(function()
-			if frame then
+			if frame and not frame.Visible then
+				slotsObliterator:Cleanup()
+				mainDisplayFrameObliterator:Cleanup()
+
 				closeAllFrames()
+
 				frame.Visible = true
 
-				if button.Name == "Accessory" or button.Name == "Shirt" or button.Name == "Pants" then
+				if button.Name == "Wearing" then
+					editor.Main.WearingFrame.Visible = true
+				else
 					editor.Main.MainFrame.Visible = true
 				end
-				return
 			end
 		end))
 	end
-end
-
-local function closeEditor(obliterator: typeof(Janitor.new()))
-	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)
-	obliterator:Cleanup()
-	-- player.Character.Archivable = false
-	editor.Enabled = false
 end
 
 local function main()
