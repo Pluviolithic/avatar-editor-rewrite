@@ -12,6 +12,7 @@ local currentPage = 0
 local currentResults = nil
 local accessoryLimit = 15
 local currentCategory = ""
+local currentSearchString = ""
 local currentDescription = nil
 local starterDescription = nil
 local scrollingRefreshDebounce = false
@@ -220,10 +221,6 @@ local function resetUI()
 	wearingObliterator:Cleanup()
 	outfitsObliterator:Cleanup()
 	mainDisplayFrameObliterator:Cleanup()
-
-	clearDisplayFrame(editor.Main.BundleFrame.Items)
-	clearDisplayFrame(editor.Main.WearingFrame.Items)
-	clearDisplayFrame(editor.Main.OutfitsFrame.Items)
 
 	closeAllFrames()
 
@@ -514,8 +511,8 @@ local function search(text: string?): CatalogPages
 	return AvatarEditorService:SearchCatalog(searchParameters)
 end
 
-local function openCategory(categoryName: string)
-	if currentCategory == categoryName then
+local function openCategory(categoryName: string, searchString: string)
+	if currentCategory == categoryName and searchString ~= currentSearchString then
 		return
 	end
 	currentCategory = categoryName
@@ -527,12 +524,15 @@ local function openCategory(categoryName: string)
 	outfitsObliterator:Cleanup()
 	mainDisplayFrameObliterator:Cleanup()
 
-	currentResults = search()
+	currentSearchString = searchString
+
+	currentResults = search(searchString)
 	displayResultsInFrame(scrollingFrame)
 
 	mainDisplayFrameObliterator:Add(function()
 		currentPage = 0
 		currentResults = nil
+		currentSearchString = ""
 		scrollingFrame.CanvasPosition = Vector2.new(0, 0)
 	end, true)
 
@@ -561,7 +561,8 @@ local function handleCategoryButton(button: GuiBase, obliterator: typeof(Janitor
 		return
 	end
 	obliterator:Add(button.Activated:Connect(function()
-		openCategory(button.Name)
+		editor.Main.MainFrame.Search.Text = ""
+		openCategory(button.Name, "")
 	end))
 end
 
@@ -614,9 +615,10 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 	end))
 
 	obliterator:Add(editor.Main.WearingFrame.RemoveAll.Activated:Connect(function()
-		currentDescription.Shirt = 0
-		currentDescription.Pants = 0
+		currentDescription.Shirt = 868697637
+		currentDescription.Pants = 868697782
 		currentDescription.GraphicTShirt = 0
+		currentDescription.Face = 144075659
 		currentDescription:SetAccessories({}, true)
 		applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
 	end))
@@ -630,6 +632,13 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 		resetUI()
 		resetDescription:FireServer()
 		currentDescription = Players:GetHumanoidDescriptionFromUserId(player.UserId)
+	end))
+
+	obliterator:Add(editor.Main.MainFrame.Search.FocusLost:Connect(function(entered)
+		if not entered or not currentCategory then
+			return
+		end
+		openCategory(currentCategory, editor.Main.MainFrame.Search.Text)
 	end))
 
 	for _, button in ipairs(editor.Main:GetChildren()) do
