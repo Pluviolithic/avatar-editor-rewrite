@@ -190,13 +190,13 @@ local function unequipItem(description: HumanoidDescription, itemId: number)
 		description:SetAccessories(accessories, true)
 	else
 		if description.Pants == itemId then
-			description.Pants = 0
+			description.Pants = 868697782
 		elseif description.Shirt == itemId then
-			description.Shirt = 0
+			description.Shirt = 868697637
 		elseif description.GraphicTShirt == itemId then
 			description.GraphicTShirt = 0
 		elseif description.Face == itemId then
-			description.Face = 0
+			description.Face = 144075659
 		end
 	end
 
