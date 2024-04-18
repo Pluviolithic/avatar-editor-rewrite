@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Janitor = require(ReplicatedStorage.Common.lib.Janitor)
 
+local outfits = nil
 local currentPage = 0
 local currentResults = nil
 local accessoryLimit = 15
@@ -18,15 +19,41 @@ local scrollingRefreshDebounce = false
 local player = Players.LocalPlayer
 local slotsObliterator = Janitor.new()
 local wearingObliterator = Janitor.new()
+local outfitsObliterator = Janitor.new()
 local mainDisplayFrameObliterator = Janitor.new()
 local editor = player.PlayerGui:WaitForChild("EditAvatar")
 
 local slotTemplate = editor.Main.Slots.Template:Clone()
 local itemTemplate = editor.Main.MainFrame.Items.Template:Clone()
+local outfitTemplate = editor.Main.OutfitsFrame.Items.Template:Clone()
 
+local addOutfit = ReplicatedStorage.Remotes.AddOutfit
+local getOutfits = ReplicatedStorage.Remotes.GetOutfits
+local deleteOutfit = ReplicatedStorage.Remotes.DeleteOutfit
+local updateOutfit = ReplicatedStorage.Remotes.UpdateOutfit
 local saveDescription = ReplicatedStorage.Remotes.SaveDescription
 local resetDescription = ReplicatedStorage.Remotes.ResetDescription
 local applyDescription = ReplicatedStorage.Remotes.ApplyDescription
+
+local enumLookupTable = {
+	Enum.AccessoryType.Hat,
+	Enum.AccessoryType.Hair,
+	Enum.AccessoryType.Face,
+	Enum.AccessoryType.Neck,
+	Enum.AccessoryType.Shoulder,
+	Enum.AccessoryType.Front,
+	Enum.AccessoryType.Back,
+	Enum.AccessoryType.Waist,
+	Enum.AccessoryType.TShirt,
+	Enum.AccessoryType.Shirt,
+	Enum.AccessoryType.Pants,
+	Enum.AccessoryType.Jacket,
+	Enum.AccessoryType.Sweater,
+	Enum.AccessoryType.Shorts,
+	Enum.AccessoryType.LeftShoe,
+	Enum.AccessoryType.RightShoe,
+	Enum.AccessoryType.DressSkirt,
+}
 
 local accessoryTypeRemaps = {
 	["3DDress"] = Enum.AccessoryType.DressSkirt,
@@ -62,6 +89,27 @@ local avatarAssetTypeRemaps = {
 	["3DSweater"] = Enum.AvatarAssetType.SweaterAccessory,
 	["3DTShirt"] = Enum.AvatarAssetType.TShirtAccessory,
 }
+
+local function getAdjustedCameraAngle(angle: Vector2)
+	return CFrame.Angles(0, math.rad(angle.X), 0)
+		* CFrame.Angles(0, math.rad(angle.Y), 0)
+		* CFrame.Angles(0, math.pi, 0)
+		* CFrame.new(Vector3.new(0, 0, 6))
+end
+
+local function deepCopy(original)
+	local copy = {}
+
+	for k, v in pairs(original) do
+		if type(v) == "table" then
+			v = deepCopy(v)
+		end
+
+		copy[k] = v
+	end
+
+	return copy
+end
 
 local function serializeHumanoidDescription(description: HumanoidDescription)
 	return {
@@ -106,6 +154,51 @@ local function serializeHumanoidDescription(description: HumanoidDescription)
 	}
 end
 
+local function deserializeHumanoidDescription(serializedHumanoidDescription: { [string]: any }): HumanoidDescription
+	local serialized = table.clone(serializedHumanoidDescription)
+	local description = Instance.new("HumanoidDescription")
+
+	for i = #serialized.Accessories, 16, -1 do
+		table.remove(serialized.Accessories)
+	end
+
+	description:SetAccessories(serialized.Accessories, true)
+
+	for animationCategory, animationId in pairs(serialized.Animations) do
+		description[animationCategory] = animationId
+	end
+
+	for scaleCategory, scale in pairs(serialized.Scales) do
+		description[scaleCategory] = scale
+	end
+
+	for colorCategory, color in pairs(serialized.Colors) do
+		description[colorCategory] = Color3.new(table.unpack(color))
+	end
+
+	for bodyPartCategory, bodyPartId in pairs(serialized.BodyParts) do
+		description[bodyPartCategory] = bodyPartId
+	end
+
+	description.GraphicTShirt = serialized.GraphicTShirt
+	description.Shirt = serialized.Shirt
+	description.Pants = serialized.Pants
+
+	return description
+end
+
+local function deserializeFromDataStore(serializedHumanoidDescription)
+	local deserialized = deepCopy(serializedHumanoidDescription)
+	for _, accessory in deserialized.Accessories do
+		accessory.AccessoryType = enumLookupTable[accessory.AccessoryType]
+	end
+	return deserialized
+end
+
+local function fullDeserialize(serializedHumanoidDescription)
+	return deserializeHumanoidDescription(deserializeFromDataStore(serializedHumanoidDescription))
+end
+
 local function clearDisplayFrame(frame: ScrollingFrame)
 	for _, itemDisplay in ipairs(frame:GetChildren()) do
 		if itemDisplay:IsA("ImageLabel") then
@@ -124,6 +217,8 @@ end
 
 local function resetUI()
 	slotsObliterator:Cleanup()
+	wearingObliterator:Cleanup()
+	outfitsObliterator:Cleanup()
 	mainDisplayFrameObliterator:Cleanup()
 
 	clearDisplayFrame(editor.Main.BundleFrame.Items)
@@ -294,6 +389,52 @@ local function displayCurrentlyWearing()
 	end
 end
 
+local function displayOutfits()
+	for i, outfit in ipairs(outfits) do
+		local outfitDisplay = outfitTemplate:Clone()
+		outfitsObliterator:Add(outfitDisplay)
+		outfitDisplay.Parent = editor.Main.OutfitsFrame.Items
+
+		if typeof(outfit) ~= "table" then
+			local camera = Instance.new("Camera")
+			local characterDisplay = Players:CreateHumanoidModelFromDescription(outfit, Enum.HumanoidRigType.R15)
+
+			camera.CFrame = characterDisplay.Humanoid.RootPart.CFrame * getAdjustedCameraAngle(Vector2.new())
+			camera.Parent = outfitDisplay.Character
+
+			outfitDisplay.Character.CurrentCamera = camera
+			characterDisplay.Parent = outfitDisplay.Character.WorldModel
+			characterDisplay.Humanoid:ApplyDescription(outfit)
+
+			task.spawn(function()
+				local angle = Vector2.new()
+				while outfitDisplay.Parent do
+					angle = angle + Vector2.new(0.5, 0)
+					outfitDisplay.Character.CurrentCamera.CFrame = outfitDisplay.Character.WorldModel:FindFirstChildWhichIsA(
+						"Model"
+					).Humanoid.RootPart.CFrame * getAdjustedCameraAngle(angle)
+					task.wait()
+				end
+			end)
+		end
+
+		outfitDisplay.Delete.Activated:Connect(function()
+			table.remove(outfits, i)
+			deleteOutfit:FireServer(i)
+			outfitDisplay:Destroy()
+		end)
+
+		outfitDisplay.Update.Activated:Connect(function()
+			updateOutfit:FireServer(i, serializeHumanoidDescription(currentDescription))
+			outfits[i] = currentDescription:Clone()
+			local characterClone = outfitDisplay.Character.WorldModel:FindFirstChildWhichIsA("Model")
+				or player.Character:Clone()
+			characterClone.Parent = outfitDisplay.Character.WorldModel
+			characterClone.Humanoid:ApplyDescription(currentDescription)
+		end)
+	end
+end
+
 local function displayResultsInFrame(frame: ScrollingFrame)
 	local page = currentResults:GetCurrentPage()
 	local missingSlots = getMapOfEquippedItemsFromCategory(currentCategory, currentDescription)
@@ -370,10 +511,6 @@ local function search(text: string?): CatalogPages
 		searchParameters.SearchKeyword = text
 	end
 
-	-- if currentCategory == "LeftShoeAccessory" or currentCategory == "RightShoeAccessory" then
-	-- 	searchParameters.BundleTypes = { Enum.BundleType.Shoes }
-	-- end
-	--
 	return AvatarEditorService:SearchCatalog(searchParameters)
 end
 
@@ -386,7 +523,10 @@ local function openCategory(categoryName: string)
 	local scrollingFrame = editor.Main.MainFrame.Items
 
 	slotsObliterator:Cleanup()
+	wearingObliterator:Cleanup()
+	outfitsObliterator:Cleanup()
 	mainDisplayFrameObliterator:Cleanup()
+
 	currentResults = search()
 	displayResultsInFrame(scrollingFrame)
 
@@ -428,7 +568,7 @@ end
 local function closeEditor(obliterator: typeof(Janitor.new()))
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, true)
 	obliterator:Cleanup()
-	-- player.Character.Archivable = false
+	player.Character.Archivable = false
 	editor.Enabled = false
 end
 
@@ -436,6 +576,7 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)
 	editor.Enabled = true
 
+	player.Character.Archivable = true
 	currentDescription = player.Character.Humanoid:GetAppliedDescription()
 	starterDescription = currentDescription:Clone()
 
@@ -452,6 +593,19 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 	for _, button in ipairs(editor.Main.PantsFrame:GetChildren()) do
 		handleCategoryButton(button, obliterator)
 	end
+
+	obliterator:Add(editor.Main.OutfitsFrame.CreateOutfit.Activated:Connect(function()
+		if outfits and #outfits < 10 then
+			table.insert(outfits, {
+				_empty = true,
+			})
+			addOutfit:FireServer()
+
+			local outfitDisplay = outfitTemplate:Clone()
+			outfitsObliterator:Add(outfitDisplay)
+			outfitDisplay.Parent = editor.Main.OutfitsFrame.Items
+		end
+	end))
 
 	obliterator:Add(editor.Main.Apply.Activated:Connect(function()
 		editor.Enabled = false
@@ -495,8 +649,22 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 				frame.Visible = true
 
 				if button.Name == "Wearing" then
-					editor.Main.WearingFrame.Visible = true
 					displayCurrentlyWearing()
+				elseif button.Name == "Outfits" then
+					if not outfits then
+						outfits = getOutfits:InvokeServer()
+						while not outfits do
+							outfits = getOutfits:InvokeServer()
+							task.wait(5)
+						end
+
+						for i, outfit in ipairs(outfits) do
+							if not outfit._empty then
+								outfits[i] = fullDeserialize(outfit)
+							end
+						end
+					end
+					displayOutfits()
 				else
 					editor.Main.MainFrame.Visible = true
 				end
@@ -510,6 +678,7 @@ local function main()
 
 	editor.Main.Slots.Template:Destroy()
 	editor.Main.MainFrame.Items.Template:Destroy()
+	editor.Main.OutfitsFrame.Items.Template:Destroy()
 
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if processed or input.KeyCode ~= Enum.KeyCode.P then

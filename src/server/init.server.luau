@@ -2,12 +2,16 @@ local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local addOutfit = ReplicatedStorage.Remotes.AddOutfit
+local getOutfits = ReplicatedStorage.Remotes.GetOutfits
+local deleteOutfit = ReplicatedStorage.Remotes.DeleteOutfit
+local updateOutfit = ReplicatedStorage.Remotes.UpdateOutfit
 local saveDescription = ReplicatedStorage.Remotes.SaveDescription
 local resetDescription = ReplicatedStorage.Remotes.ResetDescription
 local applyDescription = ReplicatedStorage.Remotes.ApplyDescription
 
 local allOutfitData = {}
-local outfitDataStore = DataStoreService:GetDataStore("Outfits")
+local outfitDataStore = DataStoreService:GetDataStore("Outfits2")
 
 local enumLookupTable = {
 	Enum.AccessoryType.Hat,
@@ -140,9 +144,9 @@ local function deserializeHumanoidDescription(serializedHumanoidDescription: { [
 	return description
 end
 
-local function fullSerialize(description: HumanoidDescription)
-	return serializeForDataStore(serializeHumanoidDescription(description))
-end
+-- local function fullSerialize(description: HumanoidDescription)
+-- 	return serializeForDataStore(serializeHumanoidDescription(description))
+-- end
 
 local function fullDeserialize(serializedHumanoidDescription)
 	return deserializeHumanoidDescription(deserializeFromDataStore(serializedHumanoidDescription))
@@ -160,7 +164,9 @@ local function onPlayerAdded(player: Player)
 		end
 		allOutfitData[player.UserId] = outfitData
 	else
-		allOutfitData[player.UserId] = {}
+		allOutfitData[player.UserId] = {
+			Outfits = {},
+		}
 	end
 end
 
@@ -189,6 +195,30 @@ saveDescription.OnServerEvent:Connect(function(player, serializedHumanoidDescrip
 	allOutfitData[player.UserId].CurrentOutfit = serializeForDataStore(serializedHumanoidDescription)
 	outfitDataStore:SetAsync(`Key_{player.UserId}`, allOutfitData[player.UserId])
 end)
+
+addOutfit.OnServerEvent:Connect(function(player)
+	if allOutfitData[player.UserId] and #allOutfitData[player.UserId].Outfits < 10 then
+		table.insert(allOutfitData[player.UserId].Outfits, {
+			_empty = true,
+		})
+	end
+end)
+
+deleteOutfit.OnServerEvent:Connect(function(player, outfitIndex)
+	if allOutfitData[player.UserId] and #allOutfitData[player.UserId].Outfits >= outfitIndex then
+		table.remove(allOutfitData[player.UserId].Outfits, outfitIndex)
+	end
+end)
+
+updateOutfit.OnServerEvent:Connect(function(player, outfitIndex, serializedHumanoidDescription)
+	if allOutfitData[player.UserId] and #allOutfitData[player.UserId].Outfits >= outfitIndex then
+		allOutfitData[player.UserId].Outfits[outfitIndex] = serializeForDataStore(serializedHumanoidDescription)
+	end
+end)
+
+getOutfits.OnServerInvoke = function(player)
+	return allOutfitData[player.UserId] and allOutfitData[player.UserId].Outfits
+end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
 
