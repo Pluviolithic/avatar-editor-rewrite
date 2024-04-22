@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local UserInputService = game:GetService("UserInputService")
 local AvatarEditorService = game:GetService("AvatarEditorService")
@@ -18,6 +19,7 @@ local starterDescription = nil
 local scrollingRefreshDebounce = false
 
 local player = Players.LocalPlayer
+local scaleObliterator = Janitor.new()
 local slotsObliterator = Janitor.new()
 local wearingObliterator = Janitor.new()
 local outfitsObliterator = Janitor.new()
@@ -90,6 +92,10 @@ local avatarAssetTypeRemaps = {
 	["3DSweater"] = Enum.AvatarAssetType.SweaterAccessory,
 	["3DTShirt"] = Enum.AvatarAssetType.TShirtAccessory,
 }
+
+function map(x, inMin, inMax, outMin, outMax)
+	return outMin + (x - inMin) * (outMax - outMin) / (inMax - inMin)
+end
 
 local function getAdjustedCameraAngle(angle: Vector2)
 	return CFrame.Angles(0, math.rad(angle.X), 0)
@@ -218,6 +224,7 @@ end
 
 local function resetUI()
 	slotsObliterator:Cleanup()
+	scaleObliterator:Cleanup()
 	wearingObliterator:Cleanup()
 	outfitsObliterator:Cleanup()
 	mainDisplayFrameObliterator:Cleanup()
@@ -325,26 +332,26 @@ local function getMapOfEquippedItemsFromCategory(category: string, description: 
 		return { [description[category]] = true }
 	end
 
-	local map = {}
+	local equippedMap = {}
 	if category:match("Accessory") then
 		if description[category] == "" then
-			return map
+			return equippedMap
 		end
 
 		for _, stringId in ipairs((description[category] :: string):split(",")) do
-			map[tonumber(stringId)] = true
+			equippedMap[tonumber(stringId)] = true
 		end
 
-		return map
+		return equippedMap
 	end
 
 	for _, item in ipairs(description:GetAccessories(false)) do
 		if item.AccessoryType == accessoryTypeRemaps[category] then
-			map[item.AssetId] = true
+			equippedMap[item.AssetId] = true
 		end
 	end
 
-	return map
+	return equippedMap
 end
 
 local function getAllEquippedItems(description: HumanoidDescription)
@@ -556,6 +563,47 @@ local function openCategory(categoryName: string, searchString: string)
 	)
 end
 
+local viewportSize = workspace.CurrentCamera.ViewportSize
+local sliderStartX, sliderEndX = -0.015, 0.905
+
+local function handleScaleSlider(slider: ImageButton)
+	scaleObliterator:Add(slider.InputBegan:Connect(function(input)
+		if
+			input.UserInputType ~= Enum.UserInputType.MouseButton1
+			and input.UserInputType ~= Enum.UserInputType.Touch
+		then
+			return
+		end
+
+		local moveConnection
+		if UserInputService.MouseEnabled then
+			moveConnection = scaleObliterator:Add(slider.MouseMoved:Connect(function() end))
+		else
+			moveConnection = scaleObliterator:Add(slider.TouchPan:Connect(function() end))
+		end
+
+		local steppedConnection, endedConnection
+		steppedConnection = scaleObliterator:Add(RunService.Stepped:Connect(function()
+			local mouseLocation = UserInputService:GetMouseLocation()
+			local mappedDelta = map(mouseLocation.X, 0, viewportSize.X, sliderStartX, sliderEndX)
+			print(mappedDelta)
+
+			slider.Position = UDim2.fromScale(mappedDelta, slider.Position.Y.Scale)
+		end))
+
+		endedConnection = scaleObliterator:Add(UserInputService.InputEnded:Connect(function(input: InputObject)
+			if
+				input.UserInputType ~= Enum.UserInputType.MouseButton1
+				and input.UserInputType ~= Enum.UserInputType.Touch
+			then
+				return
+			end
+			endedConnection:Disconnect()
+			steppedConnection:Disconnect()
+		end))
+	end))
+end
+
 local function handleCategoryButton(button: GuiBase, obliterator: typeof(Janitor.new()))
 	if not button:IsA("GuiButton") then
 		return
@@ -594,6 +642,20 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 	for _, button in ipairs(editor.Main.PantsFrame:GetChildren()) do
 		handleCategoryButton(button, obliterator)
 	end
+
+	for _, sliderFrame in ipairs(editor.Main.ScaleFrame.Frame:GetChildren()) do
+		local slider = sliderFrame:FindFirstChild("Slider")
+		if not slider then
+			continue
+		end
+
+		handleScaleSlider(slider)
+	end
+
+	obliterator:Add(editor.Main.BodyFrame.Scale.Activated:Connect(function()
+		editor.Main.MainFrame.Visible = false
+		editor.Main.ScaleFrame.Visible = true
+	end))
 
 	obliterator:Add(editor.Main.OutfitsFrame.CreateOutfit.Activated:Connect(function()
 		if outfits and #outfits < 10 then
