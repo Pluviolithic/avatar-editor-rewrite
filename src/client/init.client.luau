@@ -1,9 +1,8 @@
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
+local AssetService = game:GetService("AssetService")
 local UserInputService = game:GetService("UserInputService")
 local AvatarEditorService = game:GetService("AvatarEditorService")
-local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Janitor = require(ReplicatedStorage.Common.lib.Janitor)
@@ -94,9 +93,48 @@ local avatarAssetTypeRemaps = {
 	["3DTShirt"] = Enum.AvatarAssetType.TShirtAccessory,
 }
 
-function map(x, inMin, inMax, outMin, outMax)
-	return outMin + (x - inMin) * (outMax - outMin) / (inMax - inMin)
-end
+local colors = {
+	Color3.fromRGB(90, 76, 66),
+	Color3.fromRGB(124, 92, 70),
+	Color3.fromRGB(175, 148, 131),
+	Color3.fromRGB(204, 142, 105),
+	Color3.fromRGB(234, 184, 146),
+	Color3.fromRGB(86, 66, 54),
+	Color3.fromRGB(105, 64, 40),
+	Color3.fromRGB(188, 155, 93),
+	Color3.fromRGB(199, 172, 120),
+	Color3.fromRGB(215, 197, 154),
+	Color3.fromRGB(149, 121, 119),
+	Color3.fromRGB(163, 75, 75),
+	Color3.fromRGB(218, 134, 122),
+	Color3.fromRGB(255, 201, 201),
+	Color3.fromRGB(255, 152, 220),
+	Color3.fromRGB(116, 134, 157),
+	Color3.fromRGB(82, 124, 174),
+	Color3.fromRGB(128, 187, 220),
+	Color3.fromRGB(177, 167, 255),
+	Color3.fromRGB(167, 94, 155),
+	Color3.fromRGB(0, 143, 156),
+	Color3.fromRGB(91, 154, 76),
+	Color3.fromRGB(124, 156, 107),
+	Color3.fromRGB(161, 196, 140),
+	Color3.fromRGB(226, 155, 64),
+	Color3.fromRGB(245, 205, 48),
+	Color3.fromRGB(248, 217, 109),
+	Color3.fromRGB(17, 17, 17),
+	Color3.fromRGB(99, 95, 98),
+	Color3.fromRGB(205, 205, 205),
+	Color3.fromRGB(248, 248, 248),
+}
+
+local colorFields = {
+	"HeadColor",
+	"LeftArmColor",
+	"LeftLegColor",
+	"RightArmColor",
+	"RightLegColor",
+	"TorsoColor",
+}
 
 local function getAdjustedCameraAngle(angle: Vector2)
 	return CFrame.Angles(0, math.rad(angle.X), 0)
@@ -207,13 +245,13 @@ local function fullDeserialize(serializedHumanoidDescription)
 	return deserializeHumanoidDescription(deserializeFromDataStore(serializedHumanoidDescription))
 end
 
-local function clearDisplayFrame(frame: ScrollingFrame)
-	for _, itemDisplay in ipairs(frame:GetChildren()) do
-		if itemDisplay:IsA("ImageLabel") then
-			itemDisplay:Destroy()
-		end
-	end
-end
+-- local function clearDisplayFrame(frame: ScrollingFrame)
+-- 	for _, itemDisplay in ipairs(frame:GetChildren()) do
+-- 		if itemDisplay:IsA("ImageLabel") then
+-- 			itemDisplay:Destroy()
+-- 		end
+-- 	end
+-- end
 
 local function closeAllFrames()
 	for _, element in ipairs(editor.Main:GetChildren()) do
@@ -318,7 +356,7 @@ local function createSlotForItem(itemId: number)
 
 	local slotDisplay = slotTemplate:Clone()
 
-	slotDisplay.Item.Image = `http://www.roblox.com/Thumbs/Asset.ashx?width=110&height=110&assetId={itemId}`
+	slotDisplay.Item.Image = `rbxthumb://type=Asset&id={itemId}&w=150&h=150`
 	slotDisplay.Name = itemId
 	slotDisplay.Parent = editor.Main.Slots
 	slotsObliterator:Add(slotDisplay)
@@ -377,12 +415,30 @@ local function getAllEquippedItems(description: HumanoidDescription)
 	return list
 end
 
+local function displayColors()
+	for _, color in ipairs(colors) do
+		local colorDisplay = itemTemplate:Clone()
+
+		colorDisplay.ImageColor3 = color
+
+		colorDisplay.Item.Activated:Connect(function()
+			for _, colorField in ipairs(colorFields) do
+				currentDescription[colorField] = color
+			end
+			applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
+		end)
+
+		colorDisplay.Parent = editor.Main.MainFrame.Items
+		mainDisplayFrameObliterator:Add(colorDisplay)
+	end
+end
+
 local function displayCurrentlyWearing()
 	for _, item in ipairs(getAllEquippedItems(currentDescription)) do
 		local itemDisplay = itemTemplate:Clone()
 
 		itemDisplay.Name = item.AssetId
-		itemDisplay.Item.Image = `http://www.roblox.com/Thumbs/Asset.ashx?width=110&height=110&assetId={item.AssetId}`
+		itemDisplay.Item.Image = `rbxthumb://type=Asset&id={item.AssetId}&w=150&h=150`
 
 		itemDisplay.Item.Activated:Connect(function()
 			unequipItem(currentDescription, item.AssetId)
@@ -450,7 +506,7 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 		local itemDisplay = itemTemplate:Clone()
 
 		itemDisplay.Name = item.Id
-		itemDisplay.Item.Image = `http://www.roblox.com/Thumbs/Asset.ashx?width=110&height=110&assetId={item.Id}`
+		itemDisplay.Item.Image = `rbxthumb://type=Asset&id={item.Id}&w=150&h=150`
 
 		if hasItemEquipped(currentDescription, item.Id) then
 			itemDisplay.Equipped.Visible = true
@@ -507,11 +563,46 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 	end
 end
 
+local function displayBundles()
+	local page = currentResults:GetCurrentPage()
+
+	for _, bundle in ipairs(page) do
+		local bundleDisplay = itemTemplate:Clone()
+
+		bundleDisplay.Name = bundle.Id
+		bundleDisplay.Item.Image = `rbxthumb://type=BundleThumbnail&id={bundle.Id}&w=150&h=150`
+
+		bundleDisplay.Item.Activated:Connect(function()
+			local success, bundleDetails = pcall(AssetService.GetBundleDetailsAsync, AssetService, bundle.Id)
+			if not success then
+				return
+			end
+
+			local equippedItems = getAllEquippedItems(currentDescription)
+			for _, item in ipairs(bundleDetails.Items) do
+				print(item.Id)
+			end
+		end)
+
+		bundleDisplay.Parent = editor.Main.MainFrame.Items
+		mainDisplayFrameObliterator:Add(bundleDisplay)
+	end
+end
+
 local function search(text: string?): CatalogPages
 	local searchParameters = CatalogSearchParams.new()
 
 	searchParameters.Limit = 60
-	searchParameters.AssetTypes = { avatarAssetTypeRemaps[currentCategory] or Enum.AvatarAssetType[currentCategory] }
+
+	if currentCategory == "Bundles" then
+		searchParameters.BundleTypes = { Enum.BundleType.BodyParts }
+	elseif currentCategory == "Animations" then
+		searchParameters.BundleTypes = { Enum.BundleType.Animations }
+	else
+		searchParameters.AssetTypes =
+			{ avatarAssetTypeRemaps[currentCategory] or Enum.AvatarAssetType[currentCategory] }
+	end
+
 	if text then
 		searchParameters.SearchKeyword = text
 	end
@@ -535,7 +626,12 @@ local function openCategory(categoryName: string, searchString: string)
 	currentSearchString = searchString
 
 	currentResults = search(searchString)
-	displayResultsInFrame(scrollingFrame)
+
+	if currentCategory == "Bundles" or currentCategory == "Animations" then
+		displayBundles()
+	else
+		displayResultsInFrame(scrollingFrame)
+	end
 
 	mainDisplayFrameObliterator:Add(function()
 		currentPage = 0
@@ -555,7 +651,11 @@ local function openCategory(categoryName: string, searchString: string)
 				scrollingRefreshDebounce = true
 
 				currentResults:AdvanceToNextPageAsync()
-				displayResultsInFrame(scrollingFrame)
+				if currentCategory == "Bundles" or currentCategory == "Animations" then
+					displayBundles()
+				else
+					displayResultsInFrame(scrollingFrame)
+				end
 
 				task.wait(2)
 				scrollingRefreshDebounce = false
@@ -636,10 +736,20 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 
 	obliterator:Add(editor.Main.BodyFrame.Scale.Activated:Connect(function()
 		closeAllFrames()
+		editor.Main.MainFrame.Search.Text = ""
 		editor.Main.BodyFrame.Visible = true
 		editor.Main.ScaleFrame.Visible = true
 	end))
 
+	obliterator:Add(editor.Main.BodyFrame.Skin.Activated:Connect(function()
+		closeAllFrames()
+		editor.Main.MainFrame.Search.Text = ""
+		editor.Main.BodyFrame.Visible = true
+		editor.Main.MainFrame.Visible = true
+		displayColors()
+	end))
+
+	handleCategoryButton(editor.Main.BodyFrame.Bundles, obliterator)
 	handleCategoryButton(editor.Main.BodyFrame.Face, obliterator)
 
 	obliterator:Add(editor.Main.OutfitsFrame.CreateOutfit.Activated:Connect(function()
