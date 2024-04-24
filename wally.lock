@@ -3,18 +3,8 @@
 registry = "test"
 
 [[package]]
-name = "csqrl/sift"
-version = "0.0.3"
-dependencies = []
-
-[[package]]
-name = "evaera/cmdr"
-version = "1.12.0"
-dependencies = []
-
-[[package]]
-name = "evaera/promise"
-version = "3.2.1"
+name = "aerodymier/slidermodule"
+version = "0.2.4"
 dependencies = []
 
 [[package]]
@@ -23,46 +13,11 @@ version = "4.0.0"
 dependencies = []
 
 [[package]]
-name = "grilme99/profileservice"
-version = "1.0.0"
-dependencies = []
-
-[[package]]
-name = "howmanysmall/datastructures"
-version = "1.1.1"
-dependencies = []
-
-[[package]]
 name = "howmanysmall/janitor"
 version = "1.15.7"
 dependencies = [["Promise", "evaera/promise@4.0.0"]]
 
 [[package]]
-name = "legendoj1/zoneplus"
-version = "3.2.2"
-dependencies = []
-
-[[package]]
-name = "osyrisrblx/t"
-version = "3.1.1"
-dependencies = []
-
-[[package]]
 name = "pluviolithic/avatar-editor-rewrite"
 version = "1.0.0"
-dependencies = [["Datastructures", "howmanysmall/datastructures@1.1.1"], ["Immut", "solarhorizon/immut@0.4.4"], ["Janitor", "howmanysmall/janitor@1.15.7"], ["Net", "vorlias/net@3.0.7"], ["Promise", "evaera/promise@3.2.1"], ["Rodux", "roblox/rodux@3.0.0"], ["Sift", "csqrl/sift@0.0.3"], ["ZonePlus", "legendoj1/zoneplus@3.2.2"], ["t", "osyrisrblx/t@3.1.1"]]
-
-[[package]]
-name = "roblox/rodux"
-version = "3.0.0"
-dependencies = []
-
-[[package]]
-name = "solarhorizon/immut"
-version = "0.4.4"
-dependencies = []
-
-[[package]]
-name = "vorlias/net"
-version = "3.0.7"
-dependencies = []
+dependencies = [["Janitor", "howmanysmall/janitor@1.15.7"], ["slidermodule", "aerodymier/slidermodule@0.2.4"]]

@@ -7,6 +7,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Janitor = require(ReplicatedStorage.Common.lib.Janitor)
+local Slider = require(ReplicatedStorage.Common.lib.slidermodule)
 
 local outfits = nil
 local currentPage = 0
@@ -563,44 +564,25 @@ local function openCategory(categoryName: string, searchString: string)
 	)
 end
 
-local viewportSize = workspace.CurrentCamera.ViewportSize
-local sliderStartX, sliderEndX = -0.015, 0.905
+-- local sliderStartX, sliderEndX = -0.015, 0.905
 
-local function handleScaleSlider(slider: ImageButton)
-	scaleObliterator:Add(slider.InputBegan:Connect(function(input)
-		if
-			input.UserInputType ~= Enum.UserInputType.MouseButton1
-			and input.UserInputType ~= Enum.UserInputType.Touch
-		then
-			return
-		end
-
-		local moveConnection
-		if UserInputService.MouseEnabled then
-			moveConnection = scaleObliterator:Add(slider.MouseMoved:Connect(function() end))
-		else
-			moveConnection = scaleObliterator:Add(slider.TouchPan:Connect(function() end))
-		end
-
-		local steppedConnection, endedConnection
-		steppedConnection = scaleObliterator:Add(RunService.Stepped:Connect(function()
-			local mouseLocation = UserInputService:GetMouseLocation()
-			local mappedDelta = map(mouseLocation.X, 0, viewportSize.X, sliderStartX, sliderEndX)
-			print(mappedDelta)
-
-			slider.Position = UDim2.fromScale(mappedDelta, slider.Position.Y.Scale)
-		end))
-
-		endedConnection = scaleObliterator:Add(UserInputService.InputEnded:Connect(function(input: InputObject)
-			if
-				input.UserInputType ~= Enum.UserInputType.MouseButton1
-				and input.UserInputType ~= Enum.UserInputType.Touch
-			then
-				return
-			end
-			endedConnection:Disconnect()
-			steppedConnection:Disconnect()
-		end))
+local function handleScaleSlider(slider)
+	local sliderConfig = {
+		snapFactor = 0.1,
+	}
+	if slider.Parent.Name == "Height" or slider.Parent.Name == "HeadSize" then
+		sliderConfig.min = 75
+		sliderConfig.max = 125
+	elseif slider.Parent.Name == "Width" then
+		sliderConfig.min = 70
+		sliderConfig.max = 100
+	else
+		sliderConfig.min = 0
+		sliderConfig.max = 100
+	end
+	local newSlider = Slider.new(slider.Parent, slider, slider.Button, sliderConfig)
+	scaleObliterator:Add(newSlider.ValueChanged:Connect(function(sliderValue)
+		slider.Parent.Percentage.Text = `{math.round(sliderValue)}%`
 	end))
 end
 
@@ -649,13 +631,16 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 			continue
 		end
 
-		handleScaleSlider(slider)
+		-- handleScaleSlider(slider)
 	end
 
 	obliterator:Add(editor.Main.BodyFrame.Scale.Activated:Connect(function()
-		editor.Main.MainFrame.Visible = false
+		closeAllFrames()
+		editor.Main.BodyFrame.Visible = true
 		editor.Main.ScaleFrame.Visible = true
 	end))
+
+	handleCategoryButton(editor.Main.BodyFrame.Face, obliterator)
 
 	obliterator:Add(editor.Main.OutfitsFrame.CreateOutfit.Activated:Connect(function()
 		if outfits and #outfits < 10 then
