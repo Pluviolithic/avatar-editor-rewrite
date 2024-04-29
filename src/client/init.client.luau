@@ -668,22 +668,23 @@ end
 
 local function handleScaleSlider(slider)
 	local sliderConfig = {
-		snapFactor = 0.1,
+		snapFactor = 0.01,
 	}
-	if slider.Parent.Name == "Height" or slider.Parent.Name == "HeadSize" then
+	if slider.Parent.Parent.Name == "Height" or slider.Parent.Parent.Name == "HeadSize" then
 		sliderConfig.min = 75
 		sliderConfig.max = 125
-	elseif slider.Parent.Name == "Width" then
+	elseif slider.Parent.Parent.Name == "Width" then
 		sliderConfig.min = 70
 		sliderConfig.max = 100
 	else
 		sliderConfig.min = 0
 		sliderConfig.max = 100
 	end
-	local newSlider = Slider.new(slider.Parent, slider, slider.Button, sliderConfig)
-	scaleObliterator:Add(newSlider.ValueChanged:Connect(function(sliderValue)
-		slider.Parent.Percentage.Text = `{math.round(sliderValue)}%`
+	local newSlider = Slider.new(slider.Parent, slider, slider.Button, sliderConfig, { DefaultValue = 100 })
+	scaleObliterator:Add(newSlider.ValueChanged.Event:Connect(function(sliderValue)
+		slider.Parent.Parent.Percentage.Text = `{math.round(sliderValue)}%`
 	end))
+	newSlider:Activate()
 end
 
 local function handleCategoryButton(button: GuiBase, obliterator: typeof(Janitor.new()))
@@ -725,13 +726,13 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 		handleCategoryButton(button, obliterator)
 	end
 
-	for _, sliderFrame in ipairs(editor.Main.ScaleFrame.Frame:GetChildren()) do
-		local slider = sliderFrame:FindFirstChild("Slider")
-		if not slider then
+	for _, frame in ipairs(editor.Main.ScaleFrame.Frame:GetChildren()) do
+		local sliderFrame = frame:FindFirstChild("SliderFrame")
+		if not sliderFrame then
 			continue
 		end
 
-		-- handleScaleSlider(slider)
+		handleScaleSlider(sliderFrame.Slider)
 	end
 
 	obliterator:Add(editor.Main.BodyFrame.Scale.Activated:Connect(function()
