@@ -2,8 +2,8 @@ local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
 local AssetService = game:GetService("AssetService")
 local UserInputService = game:GetService("UserInputService")
-local AvatarEditorService = game:GetService("AvatarEditorService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local AvatarEditorService = game:GetService("AvatarEditorService")
 
 local Janitor = require(ReplicatedStorage.Common.lib.Janitor)
 local Slider = require(ReplicatedStorage.Common.lib.slidermodule)
@@ -16,6 +16,7 @@ local currentCategory = ""
 local currentSearchString = ""
 local currentDescription = nil
 local starterDescription = nil
+local currentSuperCategory = ""
 local scrollingRefreshDebounce = false
 
 local player = Players.LocalPlayer
@@ -23,11 +24,13 @@ local scaleObliterator = Janitor.new()
 local slotsObliterator = Janitor.new()
 local wearingObliterator = Janitor.new()
 local outfitsObliterator = Janitor.new()
+local bundleDetailsObliterator = Janitor.new()
 local mainDisplayFrameObliterator = Janitor.new()
 local editor = player.PlayerGui:WaitForChild("EditAvatar")
 
 local slotTemplate = editor.Main.Slots.Template:Clone()
 local itemTemplate = editor.Main.MainFrame.Items.Template:Clone()
+local bundleTemplate = editor.Main.BundleFrame.Items.Template:Clone()
 local outfitTemplate = editor.Main.OutfitsFrame.Items.Template:Clone()
 
 local addOutfit = ReplicatedStorage.Remotes.AddOutfit
@@ -566,6 +569,10 @@ end
 local function displayBundles()
 	local page = currentResults:GetCurrentPage()
 
+	bundleDetailsObliterator:Add(editor.Main.BundleFrame.Close.Activated:Connect(function()
+		editor.Main.BundleFrame.Visible = false
+	end))
+
 	for _, bundle in ipairs(page) do
 		local bundleDisplay = itemTemplate:Clone()
 
@@ -578,15 +585,32 @@ local function displayBundles()
 				return
 			end
 
-			local equippedItems = getAllEquippedItems(currentDescription)
 			for _, item in ipairs(bundleDetails.Items) do
-				print(item.Id)
+				if item.Type ~= "Asset" then
+					continue
+				end
+
+				local bundleItemDisplay = bundleTemplate:Clone()
+				if hasItemEquipped(currentDescription, item.Id) then
+					bundleItemDisplay.Equipped.Visible = true
+				end
+
+				bundleItemDisplay.Item.Image = `rbxthumb://type=Asset&id={item.Id}&w=150&h=150`
+				bundleItemDisplay.Parent = editor.Main.BundleFrame.Items
+				bundleDetailsObliterator:Add(bundleItemDisplay)
 			end
+
+			editor.Main.BundleFrame.Visible = true
 		end)
+
+		bundleDetailsObliterator:Add(function()
+			editor.Main.BundleFrame.Visible = false
+		end, true)
 
 		bundleDisplay.Parent = editor.Main.MainFrame.Items
 		mainDisplayFrameObliterator:Add(bundleDisplay)
 	end
+	mainDisplayFrameObliterator:Add(bundleDetailsObliterator)
 end
 
 local function search(text: string?): CatalogPages
@@ -614,7 +638,13 @@ local function openCategory(categoryName: string, searchString: string)
 	if currentCategory == categoryName and searchString ~= currentSearchString then
 		return
 	end
+
+	if #currentCategory ~= 0 then
+		editor.Main:FindFirstChild(currentCategory, true).ImageColor3 = Color3.fromRGB(255, 255, 255)
+	end
+
 	currentCategory = categoryName
+	editor.Main:FindFirstChild(currentCategory, true).ImageColor3 = Color3.fromRGB(197, 197, 197)
 
 	local scrollingFrame = editor.Main.MainFrame.Items
 
@@ -799,6 +829,15 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 		openCategory(currentCategory, editor.Main.MainFrame.Search.Text)
 	end))
 
+	obliterator:Add(function()
+		if #currentCategory ~= 0 then
+			editor.Main:FindFirstChild(currentCategory, true).ImageColor3 = Color3.fromRGB(255, 255, 255)
+		end
+		if #currentSuperCategory ~= 0 then
+			editor.Main[currentSuperCategory].ImageColor3 = Color3.fromRGB(255, 255, 255)
+		end
+	end, true)
+
 	for _, button in ipairs(editor.Main:GetChildren()) do
 		if not button:IsA("GuiButton") then
 			continue
@@ -806,8 +845,18 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 
 		local frame = editor.Main:FindFirstChild(`{button.Name}Frame`)
 
+		if not frame then
+			continue
+		end
+
 		obliterator:Add(button.Activated:Connect(function()
-			if frame and not frame.Visible then
+			if #currentSuperCategory ~= 0 then
+				editor.Main[currentSuperCategory].ImageColor3 = Color3.fromRGB(255, 255, 255)
+			end
+			currentSuperCategory = button.Name
+			editor.Main[currentSuperCategory].ImageColor3 = Color3.fromRGB(197, 197, 197)
+
+			if not frame.Visible then
 				slotsObliterator:Cleanup()
 				mainDisplayFrameObliterator:Cleanup()
 
@@ -845,6 +894,7 @@ local function main()
 
 	editor.Main.Slots.Template:Destroy()
 	editor.Main.MainFrame.Items.Template:Destroy()
+	editor.Main.BundleFrame.Items.Template:Destroy()
 	editor.Main.OutfitsFrame.Items.Template:Destroy()
 
 	UserInputService.InputBegan:Connect(function(input, processed)
