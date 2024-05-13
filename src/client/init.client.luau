@@ -3,6 +3,7 @@ local StarterGui = game:GetService("StarterGui")
 local AssetService = game:GetService("AssetService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
 local AvatarEditorService = game:GetService("AvatarEditorService")
 
 local Janitor = require(ReplicatedStorage.Common.lib.Janitor)
@@ -83,7 +84,30 @@ local accessoryTypeRemaps = {
 	["WaistAccessory"] = Enum.AccessoryType.Waist,
 }
 
+local bodyParts = {
+	Face = true,
+	Head = true,
+	LeftArm = true,
+	LeftLeg = true,
+	RightArm = true,
+	RightLeg = true,
+	Torso = true,
+}
+
+local animationCategories = {
+	ClimbAnimation = true,
+	FallAnimation = true,
+	IdleAnimation = true,
+	JumpAnimation = true,
+	MoodAnimation = true,
+	RunAnimation = true,
+	SwimAnimation = true,
+	WalkAnimation = true,
+}
+
 local avatarAssetTypeRemaps = {
+	["ShouldersAccessory"] = Enum.AvatarAssetType.ShoulderAccessory,
+
 	["3DDress"] = Enum.AvatarAssetType.DressSkirtAccessory,
 	["3DLeftShoe"] = Enum.AvatarAssetType.LeftShoeAccessory,
 	["3DPants"] = Enum.AvatarAssetType.PantsAccessory,
@@ -95,6 +119,8 @@ local avatarAssetTypeRemaps = {
 	["3DSweater"] = Enum.AvatarAssetType.SweaterAccessory,
 	["3DTShirt"] = Enum.AvatarAssetType.TShirtAccessory,
 }
+
+local assetTypeIdRemaps = {}
 
 local colors = {
 	Color3.fromRGB(90, 76, 66),
@@ -295,6 +321,18 @@ local function hasItemEquipped(description: HumanoidDescription, itemId: number)
 		return true
 	end
 
+	for bodyPartType in pairs(bodyParts) do
+		if description[bodyPartType] == itemId then
+			return true
+		end
+	end
+
+	for animationCategory in pairs(animationCategories) do
+		if description[animationCategory] == itemId then
+			return true
+		end
+	end
+
 	return tonumber(description.Pants) == itemId
 		or tonumber(description.Shirt) == itemId
 		or tonumber(description.GraphicTShirt) == itemId
@@ -308,17 +346,6 @@ local function fixOrderFromIndex(list: { { [string]: any } }, index: number)
 	end
 end
 
--- local function countAccessoriesOfType(list: { { [string]: any } }, accessoryType: Enum.AvatarAssetType)
--- 	local count = 0
--- 	for _, accessory in ipairs(list) do
--- 		if accessory.AccessoryType == accessoryType then
--- 			count += 1
--- 		end
--- 	end
--- 	return count
--- end
---
-
 local function unequipItem(description: HumanoidDescription, itemId: number)
 	local accessories = description:GetAccessories(true)
 	local slotDisplay = editor.Main.Slots:FindFirstChild(itemId)
@@ -330,6 +357,17 @@ local function unequipItem(description: HumanoidDescription, itemId: number)
 		fixOrderFromIndex(accessories, itemIndex)
 		description:SetAccessories(accessories, true)
 	else
+		for bodyPartType in pairs(bodyParts) do
+			if description[bodyPartType] == itemId then
+				description[bodyPartType] = starterDescription[bodyPartType]
+			end
+		end
+
+		for animationCategory in pairs(animationCategories) do
+			if description[animationCategory] == itemId then
+				description[animationCategory] = starterDescription[animationCategory]
+			end
+		end
 		if description.Pants == itemId then
 			description.Pants = 868697782
 		elseif description.Shirt == itemId then
@@ -569,10 +607,6 @@ end
 local function displayBundles()
 	local page = currentResults:GetCurrentPage()
 
-	bundleDetailsObliterator:Add(editor.Main.BundleFrame.Close.Activated:Connect(function()
-		editor.Main.BundleFrame.Visible = false
-	end))
-
 	for _, bundle in ipairs(page) do
 		local bundleDisplay = itemTemplate:Clone()
 
@@ -585,6 +619,8 @@ local function displayBundles()
 				return
 			end
 
+			bundleDetailsObliterator:Cleanup()
+
 			for _, item in ipairs(bundleDetails.Items) do
 				if item.Type ~= "Asset" then
 					continue
@@ -594,6 +630,37 @@ local function displayBundles()
 				if hasItemEquipped(currentDescription, item.Id) then
 					bundleItemDisplay.Equipped.Visible = true
 				end
+
+				bundleItemDisplay.Item.Activated:Connect(function()
+					local assetType = assetTypeIdRemaps[MarketplaceService:GetProductInfo(item.Id).AssetTypeId]
+					local accessories = currentDescription:GetAccessories(true)
+					local itemIndex = getItemIndex(accessories, item.Id)
+
+					if assetType == "DynamicHead" then
+						bundleItemDisplay:Destroy()
+						return
+					end
+
+					if itemIndex then
+						unequipItem(currentDescription, item.Id)
+						return
+					elseif bodyParts[assetType] or animationCategories[assetType] then
+						currentDescription[assetType] = item.Id
+					elseif #accessories < accessoryLimit then
+						table.insert(accessories, {
+							AssetId = item.Id,
+							IsLayered = if accessoryTypeRemaps[assetType] then true else false,
+							AccessoryType = accessoryTypeRemaps[assetType] or Enum.AccessoryType[assetType],
+							Order = if accessoryTypeRemaps[assetType]
+								then #currentDescription:GetAccessories(false) + 1
+								else nil,
+						})
+					end
+
+					bundleItemDisplay.Equipped.Visible = true
+					currentDescription:SetAccessories(accessories, true)
+					applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
+				end)
 
 				bundleItemDisplay.Item.Image = `rbxthumb://type=Asset&id={item.Id}&w=150&h=150`
 				bundleItemDisplay.Parent = editor.Main.BundleFrame.Items
@@ -765,6 +832,10 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 		handleScaleSlider(sliderFrame.Slider)
 	end
 
+	obliterator:Add(editor.Main.BundleFrame.Close.Activated:Connect(function()
+		editor.Main.BundleFrame.Visible = false
+	end))
+
 	obliterator:Add(editor.Main.BodyFrame.Scale.Activated:Connect(function()
 		closeAllFrames()
 		editor.Main.MainFrame.Search.Text = ""
@@ -887,6 +958,10 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 			end
 		end))
 	end
+
+	currentSuperCategory = "Accessory"
+	editor.Main[currentSuperCategory].ImageColor3 = Color3.fromRGB(197, 197, 197)
+	openCategory("Hat", "")
 end
 
 local function main()
@@ -896,6 +971,10 @@ local function main()
 	editor.Main.MainFrame.Items.Template:Destroy()
 	editor.Main.BundleFrame.Items.Template:Destroy()
 	editor.Main.OutfitsFrame.Items.Template:Destroy()
+
+	for _, enumItem in pairs(Enum.AssetType:GetEnumItems()) do
+		assetTypeIdRemaps[enumItem.Value] = enumItem.Name
+	end
 
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if processed or input.KeyCode ~= Enum.KeyCode.P then
