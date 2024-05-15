@@ -453,6 +453,18 @@ local function getAllEquippedItems(description: HumanoidDescription)
 		table.insert(list, { AssetId = description.Face })
 	end
 
+	for bodyPartType in pairs(bodyParts) do
+		if description[bodyPartType] and description[bodyPartType] ~= 0 then
+			table.insert(list, { AssetId = description[bodyPartType] })
+		end
+	end
+
+	for animationCategory in pairs(animationCategories) do
+		if description[animationCategory] and description[animationCategory] ~= 0 then
+			table.insert(list, { AssetId = description[animationCategory] })
+		end
+	end
+
 	return list
 end
 
@@ -482,7 +494,7 @@ local function displayCurrentlyWearing()
 		itemDisplay.Item.Image = `rbxthumb://type=Asset&id={item.AssetId}&w=150&h=150`
 
 		itemDisplay.Item.Activated:Connect(function()
-			unequipItem(currentDescription, item.AssetId)
+			unequipItem(currentDescription, item.AssetId or item.BundleId)
 			itemDisplay:Destroy()
 		end)
 
@@ -561,6 +573,7 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 				if hasItemEquipped(currentDescription, item.Id) then
 					currentDescription[currentCategory] = 0
 					itemDisplay.Equipped.Visible = false
+					applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
 					return
 				end
 				createSlotForItem(item.Id)
