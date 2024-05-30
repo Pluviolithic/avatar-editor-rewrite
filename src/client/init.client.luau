@@ -690,7 +690,9 @@ local function displayBundles()
 		bundleDisplay.Parent = editor.Main.MainFrame.Items
 		mainDisplayFrameObliterator:Add(bundleDisplay)
 	end
-	mainDisplayFrameObliterator:Add(bundleDetailsObliterator)
+	mainDisplayFrameObliterator:Add(function()
+		bundleDetailsObliterator:Cleanup()
+	end, true)
 end
 
 local function search(text: string?): CatalogPages
@@ -724,7 +726,14 @@ local function openCategory(categoryName: string, searchString: string)
 	end
 
 	currentCategory = categoryName
-	editor.Main:FindFirstChild(currentCategory, true).ImageColor3 = Color3.fromRGB(197, 197, 197)
+
+	if currentCategory == "Pants" then
+		editor.Main.PantsFrame.Pants.ImageColor3 = Color3.fromRGB(197, 197, 197)
+	elseif currentCategory == "Shirt" then
+		editor.Main.ShirtFrame.Shirt.ImageColor3 = Color3.fromRGB(197, 197, 197)
+	else
+		editor.Main:FindFirstChild(currentCategory, true).ImageColor3 = Color3.fromRGB(197, 197, 197)
+	end
 
 	local scrollingFrame = editor.Main.MainFrame.Items
 
@@ -778,7 +787,7 @@ end
 
 local function handleScaleSlider(slider)
 	local sliderConfig = {
-		snapFactor = 0.01,
+		snapFactor = 0.001,
 	}
 	if slider.Parent.Parent.Name == "Height" or slider.Parent.Parent.Name == "HeadSize" then
 		sliderConfig.min = 75
@@ -948,9 +957,24 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 
 				frame.Visible = true
 
-				if button.Name == "Wearing" then
+				if currentSuperCategory == "Accessory" then
+					editor.Main.MainFrame.Visible = true
+					openCategory("Hat", "")
+				elseif currentSuperCategory == "Body" then
+					editor.Main.MainFrame.Visible = true
+					editor.Main.BodyFrame.Visible = true
+					openCategory("Bundles", "")
+				elseif currentSuperCategory == "Pants" then
+					editor.Main.MainFrame.Visible = true
+					openCategory("Pants", "")
+				elseif currentSuperCategory == "Shirt" then
+					editor.Main.MainFrame.Visible = true
+					openCategory("Shirt", "")
+				elseif currentSuperCategory == "Wearing" then
+					editor.Main.MainFrame.Visible = true
+					wearingObliterator:Cleanup()
 					displayCurrentlyWearing()
-				elseif button.Name == "Outfits" then
+				elseif currentSuperCategory == "Outfits" then
 					if not outfits then
 						outfits = getOutfits:InvokeServer()
 						while not outfits do
