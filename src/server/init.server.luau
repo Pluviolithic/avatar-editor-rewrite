@@ -196,11 +196,9 @@ saveDescription.OnServerEvent:Connect(function(player, serializedHumanoidDescrip
 	outfitDataStore:SetAsync(`Key_{player.UserId}`, allOutfitData[player.UserId])
 end)
 
-addOutfit.OnServerEvent:Connect(function(player)
+addOutfit.OnServerEvent:Connect(function(player, serializedHumanoidDescription)
 	if allOutfitData[player.UserId] and #allOutfitData[player.UserId].Outfits < 10 then
-		table.insert(allOutfitData[player.UserId].Outfits, {
-			_empty = true,
-		})
+		table.insert(allOutfitData[player.UserId].Outfits, serializeForDataStore(serializedHumanoidDescription))
 	end
 end)
 

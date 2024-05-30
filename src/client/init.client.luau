@@ -503,49 +503,57 @@ local function displayCurrentlyWearing()
 	end
 end
 
+local function updateOutfitDisplay(outfitDisplay, outfit)
+	local camera = Instance.new("Camera")
+	local characterDisplay = Players:CreateHumanoidModelFromDescription(outfit, Enum.HumanoidRigType.R15)
+
+	camera.CFrame = characterDisplay.Humanoid.RootPart.CFrame * getAdjustedCameraAngle(Vector2.new())
+	camera.Parent = outfitDisplay.Character
+
+	outfitDisplay.Character.CurrentCamera = camera
+	characterDisplay.Parent = outfitDisplay.Character.WorldModel
+	characterDisplay.Humanoid:ApplyDescription(outfit)
+
+	task.spawn(function()
+		local angle = Vector2.new()
+		while outfitDisplay.Parent do
+			angle = angle + Vector2.new(0.5, 0)
+			outfitDisplay.Character.CurrentCamera.CFrame = outfitDisplay.Character.WorldModel:FindFirstChildWhichIsA(
+				"Model"
+			).Humanoid.RootPart.CFrame * getAdjustedCameraAngle(angle)
+			task.wait()
+		end
+	end)
+
+	outfitDisplay.Delete.Activated:Connect(function()
+		deleteOutfit:FireServer(table.find(outfits, outfit))
+		table.remove(outfits, table.find(outfits, outfit))
+		outfitDisplay:Destroy()
+	end)
+
+	outfitDisplay.Update.Activated:Connect(function()
+		local i = table.find(outfits, outfit)
+		updateOutfit:FireServer(i, serializeHumanoidDescription(currentDescription))
+		outfits[i] = currentDescription:Clone()
+		outfit = outfits[i]
+		local characterClone = outfitDisplay.Character.WorldModel:FindFirstChildWhichIsA("Model")
+			or player.Character:Clone()
+		characterClone.Parent = outfitDisplay.Character.WorldModel
+		characterClone.Humanoid:ApplyDescription(currentDescription)
+	end)
+
+	outfitDisplay.Activated:Connect(function()
+		applyDescription:FireServer(serializeHumanoidDescription(outfit))
+	end)
+end
+
 local function displayOutfits()
-	for i, outfit in ipairs(outfits) do
+	for _, outfit in ipairs(outfits) do
 		local outfitDisplay = outfitTemplate:Clone()
 		outfitsObliterator:Add(outfitDisplay)
 		outfitDisplay.Parent = editor.Main.OutfitsFrame.Items
 
-		if typeof(outfit) ~= "table" then
-			local camera = Instance.new("Camera")
-			local characterDisplay = Players:CreateHumanoidModelFromDescription(outfit, Enum.HumanoidRigType.R15)
-
-			camera.CFrame = characterDisplay.Humanoid.RootPart.CFrame * getAdjustedCameraAngle(Vector2.new())
-			camera.Parent = outfitDisplay.Character
-
-			outfitDisplay.Character.CurrentCamera = camera
-			characterDisplay.Parent = outfitDisplay.Character.WorldModel
-			characterDisplay.Humanoid:ApplyDescription(outfit)
-
-			task.spawn(function()
-				local angle = Vector2.new()
-				while outfitDisplay.Parent do
-					angle = angle + Vector2.new(0.5, 0)
-					outfitDisplay.Character.CurrentCamera.CFrame = outfitDisplay.Character.WorldModel:FindFirstChildWhichIsA(
-						"Model"
-					).Humanoid.RootPart.CFrame * getAdjustedCameraAngle(angle)
-					task.wait()
-				end
-			end)
-		end
-
-		outfitDisplay.Delete.Activated:Connect(function()
-			table.remove(outfits, i)
-			deleteOutfit:FireServer(i)
-			outfitDisplay:Destroy()
-		end)
-
-		outfitDisplay.Update.Activated:Connect(function()
-			updateOutfit:FireServer(i, serializeHumanoidDescription(currentDescription))
-			outfits[i] = currentDescription:Clone()
-			local characterClone = outfitDisplay.Character.WorldModel:FindFirstChildWhichIsA("Model")
-				or player.Character:Clone()
-			characterClone.Parent = outfitDisplay.Character.WorldModel
-			characterClone.Humanoid:ApplyDescription(currentDescription)
-		end)
+		updateOutfitDisplay(outfitDisplay, outfit)
 	end
 end
 
@@ -878,14 +886,14 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 
 	obliterator:Add(editor.Main.OutfitsFrame.CreateOutfit.Activated:Connect(function()
 		if outfits and #outfits < 10 then
-			table.insert(outfits, {
-				_empty = true,
-			})
-			addOutfit:FireServer()
+			table.insert(outfits, currentDescription:Clone())
+			addOutfit:FireServer(serializeHumanoidDescription(currentDescription))
 
 			local outfitDisplay = outfitTemplate:Clone()
 			outfitsObliterator:Add(outfitDisplay)
 			outfitDisplay.Parent = editor.Main.OutfitsFrame.Items
+
+			updateOutfitDisplay(outfitDisplay, outfits[#outfits])
 		end
 	end))
 
@@ -983,9 +991,7 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 						end
 
 						for i, outfit in ipairs(outfits) do
-							if not outfit._empty then
-								outfits[i] = fullDeserialize(outfit)
-							end
+							outfits[i] = fullDeserialize(outfit)
 						end
 					end
 					displayOutfits()
