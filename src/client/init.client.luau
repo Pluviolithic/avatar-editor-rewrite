@@ -186,6 +186,20 @@ local function deepCopy(original)
 	return copy
 end
 
+local function setCategoryColor(categoryName: string, color: Color3)
+	if #categoryName == 0 then
+		return
+	end
+
+	if categoryName == "Pants" then
+		editor.Main.PantsFrame.Pants.ImageColor3 = color
+	elseif categoryName == "Shirt" then
+		editor.Main.ShirtFrame.Shirt.ImageColor3 = color
+	else
+		editor.Main:FindFirstChild(categoryName, true).ImageColor3 = color
+	end
+end
+
 local function serializeHumanoidDescription(description: HumanoidDescription)
 	return {
 		Accessories = description:GetAccessories(true),
@@ -283,6 +297,12 @@ end
 -- end
 
 local function closeAllFrames()
+	slotsObliterator:Cleanup()
+	scaleObliterator:Cleanup()
+	wearingObliterator:Cleanup()
+	outfitsObliterator:Cleanup()
+	bundleDetailsObliterator:Cleanup()
+	mainDisplayFrameObliterator:Cleanup()
 	for _, element in ipairs(editor.Main:GetChildren()) do
 		if element.Name:match("Frame") then
 			element.Visible = false
@@ -291,12 +311,6 @@ local function closeAllFrames()
 end
 
 local function resetUI()
-	slotsObliterator:Cleanup()
-	scaleObliterator:Cleanup()
-	wearingObliterator:Cleanup()
-	outfitsObliterator:Cleanup()
-	mainDisplayFrameObliterator:Cleanup()
-
 	closeAllFrames()
 
 	currentPage = 0
@@ -567,7 +581,6 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 		local itemDisplay = itemTemplate:Clone()
 
 		itemDisplay.Name = item.Id
-		itemDisplay.Item.Image = `rbxthumb://type=Asset&id={item.Id}&w=150&h=150`
 
 		if hasItemEquipped(currentDescription, item.Id) then
 			itemDisplay.Equipped.Visible = true
@@ -710,6 +723,8 @@ local function search(text: string?): CatalogPages
 
 	if currentCategory == "Bundles" then
 		searchParameters.BundleTypes = { Enum.BundleType.BodyParts }
+	elseif currentCategory == "3DLeftShoe" or currentCategory == "3DRightShoe" then
+		searchParameters.BundleTypes = { Enum.BundleType.Shoes }
 	elseif currentCategory == "Animations" then
 		searchParameters.BundleTypes = { Enum.BundleType.Animations }
 	else
@@ -729,19 +744,10 @@ local function openCategory(categoryName: string, searchString: string)
 		return
 	end
 
-	if #currentCategory ~= 0 then
-		editor.Main:FindFirstChild(currentCategory, true).ImageColor3 = Color3.fromRGB(255, 255, 255)
-	end
+	setCategoryColor(currentCategory, Color3.fromRGB(255, 255, 255))
+	setCategoryColor(categoryName, Color3.fromRGB(197, 197, 197))
 
 	currentCategory = categoryName
-
-	if currentCategory == "Pants" then
-		editor.Main.PantsFrame.Pants.ImageColor3 = Color3.fromRGB(197, 197, 197)
-	elseif currentCategory == "Shirt" then
-		editor.Main.ShirtFrame.Shirt.ImageColor3 = Color3.fromRGB(197, 197, 197)
-	else
-		editor.Main:FindFirstChild(currentCategory, true).ImageColor3 = Color3.fromRGB(197, 197, 197)
-	end
 
 	local scrollingFrame = editor.Main.MainFrame.Items
 
@@ -754,7 +760,12 @@ local function openCategory(categoryName: string, searchString: string)
 
 	currentResults = search(searchString)
 
-	if currentCategory == "Bundles" or currentCategory == "Animations" then
+	if
+		currentCategory == "Bundles"
+		or currentCategory == "Animations"
+		or currentCategory == "3DLeftShoe"
+		or currentCategory == "3DRightShoe"
+	then
 		displayBundles()
 	else
 		displayResultsInFrame(scrollingFrame)
@@ -868,6 +879,10 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 
 	obliterator:Add(editor.Main.BodyFrame.Scale.Activated:Connect(function()
 		closeAllFrames()
+		setCategoryColor(currentCategory, Color3.fromRGB(255, 255, 255))
+		setCategoryColor("Scale", Color3.fromRGB(197, 197, 197))
+		currentCategory = "Scale"
+		editor.Main.BodyFrame.Scale.ImageColor3 = Color3.fromRGB(197, 197, 197)
 		editor.Main.MainFrame.Search.Text = ""
 		editor.Main.BodyFrame.Visible = true
 		editor.Main.ScaleFrame.Visible = true
@@ -875,12 +890,16 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 
 	obliterator:Add(editor.Main.BodyFrame.Skin.Activated:Connect(function()
 		closeAllFrames()
+		setCategoryColor(currentCategory, Color3.fromRGB(255, 255, 255))
+		setCategoryColor("Skin", Color3.fromRGB(197, 197, 197))
+		currentCategory = "Skin"
 		editor.Main.MainFrame.Search.Text = ""
 		editor.Main.BodyFrame.Visible = true
 		editor.Main.MainFrame.Visible = true
 		displayColors()
 	end))
 
+	handleCategoryButton(editor.Main.BodyFrame.Animations, obliterator)
 	handleCategoryButton(editor.Main.BodyFrame.Bundles, obliterator)
 	handleCategoryButton(editor.Main.BodyFrame.Face, obliterator)
 
