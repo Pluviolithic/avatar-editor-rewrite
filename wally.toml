@@ -8,3 +8,6 @@ registry = "https://github.com/upliftgames/wally-index"
 [dependencies]
 Janitor = "howmanysmall/janitor@1.13.14"
 slidermodule = "aerodymier/slidermodule@0.2.4"
+
+[server-dependencies]
+ProfileService = "grilme99/profileservice@1.0.0"

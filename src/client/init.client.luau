@@ -8,6 +8,8 @@ local AvatarEditorService = game:GetService("AvatarEditorService")
 
 local Janitor = require(ReplicatedStorage.Common.lib.Janitor)
 local Slider = require(ReplicatedStorage.Common.lib.slidermodule)
+local Distort = require(ReplicatedStorage.Common.distort)
+local DescriptionUI = require(ReplicatedStorage.Common.DescriptionUI)
 
 local outfits = nil
 local currentPage = 0
@@ -27,8 +29,8 @@ local wearingObliterator = Janitor.new()
 local outfitsObliterator = Janitor.new()
 local bundleDetailsObliterator = Janitor.new()
 local mainDisplayFrameObliterator = Janitor.new()
-local editor = player.PlayerGui:WaitForChild("EditAvatar")
 
+local editor = player:WaitForChild("PlayerGui").EditAvatar
 local slotTemplate = editor.Main.Slots.Template:Clone()
 local itemTemplate = editor.Main.MainFrame.Items.Template:Clone()
 local bundleTemplate = editor.Main.BundleFrame.Items.Template:Clone()
@@ -41,6 +43,14 @@ local updateOutfit = ReplicatedStorage.Remotes.UpdateOutfit
 local saveDescription = ReplicatedStorage.Remotes.SaveDescription
 local resetDescription = ReplicatedStorage.Remotes.ResetDescription
 local applyDescription = ReplicatedStorage.Remotes.ApplyDescription
+
+local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+
+local websiteDescriptionFound, websiteDescription =
+	pcall(Players.GetHumanoidDescriptionFromUserId, Players, player.UserId)
+if not websiteDescriptionFound then
+	websiteDescription = nil
+end
 
 local enumLookupTable = {
 	Enum.AccessoryType.Hat,
@@ -68,6 +78,9 @@ local accessoryTypeRemaps = {
 	["3DPants"] = Enum.AccessoryType.Pants,
 	["3DRightShoe"] = Enum.AccessoryType.RightShoe,
 	["3DShorts"] = Enum.AccessoryType.Shorts,
+
+	["LeftShoeAccessory"] = Enum.AccessoryType.LeftShoe,
+	["RightShoeAccessory"] = Enum.AccessoryType.RightShoe,
 
 	["3DJacket"] = Enum.AccessoryType.Jacket,
 	["3DShirt"] = Enum.AccessoryType.Shirt,
@@ -165,6 +178,23 @@ local colorFields = {
 	"TorsoColor",
 }
 
+local debounces = {
+	close = false, -- don't want them to double click the close button
+	search = false, -- not too many searches in a short period of time
+	itemSelect = false, -- not too many equip / unequip
+	openBundle = false, -- don't open bundles or animations too close together
+	changeCategory = false, -- not too many category changes in a short period of time
+
+	reset = false,
+	removeAll = false,
+	outfitAdd = false,
+	outfitApply = false,
+	outfitDelete = false,
+	outfitUpdate = false,
+
+	IDSubmit = false,
+}
+
 local function getAdjustedCameraAngle(angle: Vector2)
 	return CFrame.Angles(0, math.rad(angle.X), 0)
 		* CFrame.Angles(0, math.rad(angle.Y), 0)
@@ -214,11 +244,11 @@ local function serializeHumanoidDescription(description: HumanoidDescription)
 			WalkAnimation = description.WalkAnimation,
 		},
 		Scales = {
-			HeightScale = description.HeightScale,
-			WidthScale = description.WidthScale,
-			HeadScale = description.HeadScale,
-			BodyTypeScale = description.BodyTypeScale,
-			ProportionScale = description.ProportionScale,
+			HeightScale = math.clamp(description.HeightScale, 0.75, 1.25),
+			WidthScale = math.clamp(description.WidthScale, 0.7, 1),
+			HeadScale = math.clamp(description.HeadScale, 0.75, 1.25),
+			BodyTypeScale = math.clamp(description.BodyTypeScale, 0, 1),
+			ProportionScale = math.clamp(description.ProportionScale, 0, 1),
 		},
 		Colors = {
 			HeadColor = { description.HeadColor.R, description.HeadColor.G, description.HeadColor.B },
@@ -289,11 +319,11 @@ local function fullDeserialize(serializedHumanoidDescription)
 end
 
 -- local function clearDisplayFrame(frame: ScrollingFrame)
--- 	for _, itemDisplay in ipairs(frame:GetChildren()) do
--- 		if itemDisplay:IsA("ImageLabel") then
--- 			itemDisplay:Destroy()
--- 		end
--- 	end
+--      for _, itemDisplay in ipairs(frame:GetChildren()) do
+--              if itemDisplay:IsA("ImageLabel") then
+--                      itemDisplay:Destroy()
+--              end
+--      end
 -- end
 
 local function closeAllFrames()
@@ -350,6 +380,7 @@ local function hasItemEquipped(description: HumanoidDescription, itemId: number)
 	return tonumber(description.Pants) == itemId
 		or tonumber(description.Shirt) == itemId
 		or tonumber(description.GraphicTShirt) == itemId
+		or tonumber(description.Face) == itemId
 end
 
 local function fixOrderFromIndex(list: { { [string]: any } }, index: number)
@@ -360,7 +391,7 @@ local function fixOrderFromIndex(list: { { [string]: any } }, index: number)
 	end
 end
 
-local function unequipItem(description: HumanoidDescription, itemId: number)
+local function unequipItem(description: HumanoidDescription, itemId: number, skipApply: boolean?)
 	local accessories = description:GetAccessories(true)
 	local slotDisplay = editor.Main.Slots:FindFirstChild(itemId)
 	local itemDisplay = editor.Main.MainFrame.Items:FindFirstChild(itemId)
@@ -373,15 +404,16 @@ local function unequipItem(description: HumanoidDescription, itemId: number)
 	else
 		for bodyPartType in pairs(bodyParts) do
 			if description[bodyPartType] == itemId then
-				description[bodyPartType] = starterDescription[bodyPartType]
+				description[bodyPartType] = 0
 			end
 		end
 
 		for animationCategory in pairs(animationCategories) do
 			if description[animationCategory] == itemId then
-				description[animationCategory] = starterDescription[animationCategory]
+				description[animationCategory] = 0
 			end
 		end
+
 		if description.Pants == itemId then
 			description.Pants = 868697782
 		elseif description.Shirt == itemId then
@@ -401,7 +433,9 @@ local function unequipItem(description: HumanoidDescription, itemId: number)
 		itemDisplay.Equipped.Visible = false
 	end
 
-	applyDescription:FireServer(serializeHumanoidDescription(description))
+	if not skipApply then
+		applyDescription:FireServer(serializeHumanoidDescription(description))
+	end
 end
 
 local function createSlotForItem(itemId: number)
@@ -417,12 +451,20 @@ local function createSlotForItem(itemId: number)
 	slotsObliterator:Add(slotDisplay)
 
 	slotDisplay.Item.Activated:Connect(function()
+		if debounces.itemSelect then
+			return
+		end
+		debounces.itemSelect = true
+		task.delay(0.5, function()
+			debounces.itemSelect = false
+		end)
+
 		unequipItem(currentDescription, itemId)
 	end)
 end
 
 local function getMapOfEquippedItemsFromCategory(category: string, description: HumanoidDescription)
-	if category == "Pants" or category == "Shirt" or category == "GraphicTShirt" then
+	if category == "Pants" or category == "Shirt" or category == "GraphicTShirt" or category == "Face" then
 		return { [description[category]] = true }
 	end
 
@@ -489,6 +531,14 @@ local function displayColors()
 		colorDisplay.ImageColor3 = color
 
 		colorDisplay.Item.Activated:Connect(function()
+			if debounces.itemSelect then
+				return
+			end
+			debounces.itemSelect = true
+			task.delay(0.5, function()
+				debounces.itemSelect = false
+			end)
+
 			for _, colorField in ipairs(colorFields) do
 				currentDescription[colorField] = color
 			end
@@ -501,14 +551,28 @@ local function displayColors()
 end
 
 local function displayCurrentlyWearing()
+	local duplicates = {}
 	for _, item in ipairs(getAllEquippedItems(currentDescription)) do
 		local itemDisplay = itemTemplate:Clone()
+
+		if duplicates[item.AssetId] then
+			continue
+		end
+		duplicates[item.AssetId] = true
 
 		itemDisplay.Name = item.AssetId
 		itemDisplay.Item.Image = `rbxthumb://type=Asset&id={item.AssetId}&w=150&h=150`
 
 		itemDisplay.Item.Activated:Connect(function()
-			unequipItem(currentDescription, item.AssetId or item.BundleId)
+			if debounces.itemSelect then
+				return
+			end
+			debounces.itemSelect = true
+			task.delay(0.5, function()
+				debounces.itemSelect = false
+			end)
+
+			unequipItem(currentDescription, item.AssetId)
 			itemDisplay:Destroy()
 		end)
 
@@ -518,6 +582,10 @@ local function displayCurrentlyWearing()
 end
 
 local function updateOutfitDisplay(outfitDisplay, outfit)
+	if not outfitDisplay:FindFirstChild("Character") then
+		return
+	end
+
 	local camera = Instance.new("Camera")
 	local characterDisplay = Players:CreateHumanoidModelFromDescription(outfit, Enum.HumanoidRigType.R15)
 
@@ -540,12 +608,28 @@ local function updateOutfitDisplay(outfitDisplay, outfit)
 	end)
 
 	outfitDisplay.Delete.Activated:Connect(function()
+		if debounces.outfitDelete then
+			return
+		end
+		debounces.outfitDelete = true
+		task.delay(0.5, function()
+			debounces.outfitDelete = false
+		end)
+
 		deleteOutfit:FireServer(table.find(outfits, outfit))
 		table.remove(outfits, table.find(outfits, outfit))
 		outfitDisplay:Destroy()
 	end)
 
 	outfitDisplay.Update.Activated:Connect(function()
+		if debounces.outfitUpdate then
+			return
+		end
+		debounces.outfitUpdate = true
+		task.delay(0.5, function()
+			debounces.outfitUpdate = false
+		end)
+
 		local i = table.find(outfits, outfit)
 		updateOutfit:FireServer(i, serializeHumanoidDescription(currentDescription))
 		outfits[i] = currentDescription:Clone()
@@ -557,7 +641,16 @@ local function updateOutfitDisplay(outfitDisplay, outfit)
 	end)
 
 	outfitDisplay.Activated:Connect(function()
+		if debounces.outfitApply then
+			return
+		end
+		debounces.outfitApply = true
+		task.delay(0.5, function()
+			debounces.outfitApply = false
+		end)
+
 		applyDescription:FireServer(serializeHumanoidDescription(outfit))
+		currentDescription = outfit:Clone()
 	end)
 end
 
@@ -572,6 +665,11 @@ local function displayOutfits()
 end
 
 local function displayResultsInFrame(frame: ScrollingFrame)
+	if not currentResults then
+		return
+	end
+
+	local currentlySelected = nil
 	local page = currentResults:GetCurrentPage()
 	local missingSlots = getMapOfEquippedItemsFromCategory(currentCategory, currentDescription)
 
@@ -581,15 +679,30 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 		local itemDisplay = itemTemplate:Clone()
 
 		itemDisplay.Name = item.Id
+		itemDisplay.Item.Image = `rbxthumb://type=Asset&id={item.Id}&w=150&h=150`
 
 		if hasItemEquipped(currentDescription, item.Id) then
+			currentlySelected = itemDisplay
 			itemDisplay.Equipped.Visible = true
 			createSlotForItem(item.Id)
 			missingSlots[item.Id] = nil
 		end
 
 		itemDisplay.Item.Activated:Connect(function()
-			if currentCategory == "Shirt" or currentCategory == "Pants" or currentCategory == "GraphicTShirt" then
+			if debounces.itemSelect then
+				return
+			end
+			debounces.itemSelect = true
+			task.delay(0.5, function()
+				debounces.itemSelect = false
+			end)
+
+			if
+				currentCategory == "Shirt"
+				or currentCategory == "Pants"
+				or currentCategory == "GraphicTShirt"
+				or currentCategory == "Face"
+			then
 				slotsObliterator:Cleanup()
 				if hasItemEquipped(currentDescription, item.Id) then
 					currentDescription[currentCategory] = 0
@@ -597,6 +710,10 @@ local function displayResultsInFrame(frame: ScrollingFrame)
 					applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
 					return
 				end
+				if currentlySelected then
+					currentlySelected.Equipped.Visible = false
+				end
+				currentlySelected = itemDisplay
 				createSlotForItem(item.Id)
 				itemDisplay.Equipped.Visible = true
 				currentDescription[currentCategory] = item.Id
@@ -648,6 +765,14 @@ local function displayBundles()
 		bundleDisplay.Item.Image = `rbxthumb://type=BundleThumbnail&id={bundle.Id}&w=150&h=150`
 
 		bundleDisplay.Item.Activated:Connect(function()
+			if debounces.openBundle then
+				return
+			end
+			debounces.openBundle = true
+			task.delay(0.5, function()
+				debounces.openBundle = false
+			end)
+
 			local success, bundleDetails = pcall(AssetService.GetBundleDetailsAsync, AssetService, bundle.Id)
 			if not success then
 				return
@@ -666,17 +791,27 @@ local function displayBundles()
 				end
 
 				bundleItemDisplay.Item.Activated:Connect(function()
+					if debounces.itemSelect then
+						return
+					end
+					debounces.itemSelect = true
+					task.delay(0.5, function()
+						debounces.itemSelect = false
+					end)
+
 					local assetType = assetTypeIdRemaps[MarketplaceService:GetProductInfo(item.Id).AssetTypeId]
-					local accessories = currentDescription:GetAccessories(true)
+					local accessories = getAllEquippedItems(currentDescription)
 					local itemIndex = getItemIndex(accessories, item.Id)
 
 					if assetType == "DynamicHead" then
-						bundleItemDisplay:Destroy()
-						return
+						--bundleItemDisplay:Destroy()
+						--return
+						assetType = "Head"
 					end
 
 					if itemIndex then
 						unequipItem(currentDescription, item.Id)
+						bundleItemDisplay.Equipped.Visible = false
 						return
 					elseif bodyParts[assetType] or animationCategories[assetType] then
 						currentDescription[assetType] = item.Id
@@ -727,6 +862,8 @@ local function search(text: string?): CatalogPages
 		searchParameters.BundleTypes = { Enum.BundleType.Shoes }
 	elseif currentCategory == "Animations" then
 		searchParameters.BundleTypes = { Enum.BundleType.Animations }
+	elseif currentCategory == "Head" then
+		searchParameters.BundleTypes = { Enum.BundleType.DynamicHead }
 	else
 		searchParameters.AssetTypes =
 			{ avatarAssetTypeRemaps[currentCategory] or Enum.AvatarAssetType[currentCategory] }
@@ -740,9 +877,11 @@ local function search(text: string?): CatalogPages
 end
 
 local function openCategory(categoryName: string, searchString: string)
-	if currentCategory == categoryName and searchString ~= currentSearchString then
+	if currentCategory == categoryName and searchString == currentSearchString then
 		return
 	end
+
+	editor.Main.MainFrame.Loading.Visible = false
 
 	setCategoryColor(currentCategory, Color3.fromRGB(255, 255, 255))
 	setCategoryColor(categoryName, Color3.fromRGB(197, 197, 197))
@@ -758,17 +897,12 @@ local function openCategory(categoryName: string, searchString: string)
 
 	currentSearchString = searchString
 
-	currentResults = search(searchString)
+	local success
+	success, currentResults = pcall(search, searchString)
 
-	if
-		currentCategory == "Bundles"
-		or currentCategory == "Animations"
-		or currentCategory == "3DLeftShoe"
-		or currentCategory == "3DRightShoe"
-	then
-		displayBundles()
-	else
-		displayResultsInFrame(scrollingFrame)
+	if not success then
+		editor.Main.MainFrame.Loading.Visible = true
+		return
 	end
 
 	mainDisplayFrameObliterator:Add(function()
@@ -778,24 +912,46 @@ local function openCategory(categoryName: string, searchString: string)
 		scrollingFrame.CanvasPosition = Vector2.new(0, 0)
 	end, true)
 
+	if
+		currentCategory == "Bundles"
+		or currentCategory == "Animations"
+		or currentCategory == "3DLeftShoe"
+		or currentCategory == "3DRightShoe"
+		or currentCategory == "Head"
+	then
+		displayBundles()
+	else
+		displayResultsInFrame(scrollingFrame)
+	end
+
 	mainDisplayFrameObliterator:Add(
 		editor.Main.MainFrame.Items:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
 			if
 				scrollingFrame.AbsoluteWindowSize.Y * scrollingFrame.CanvasSize.Y.Scale
 						+ scrollingFrame.CanvasPosition.Y
-					>= scrollingFrame.AbsoluteCanvasSize.Y - 0.1
+					>= scrollingFrame.AbsoluteCanvasSize.Y - 4
 				and not scrollingRefreshDebounce
+				and currentResults
+				and currentCategory == categoryName
 			then
 				scrollingRefreshDebounce = true
 
-				currentResults:AdvanceToNextPageAsync()
-				if currentCategory == "Bundles" or currentCategory == "Animations" then
-					displayBundles()
-				else
-					displayResultsInFrame(scrollingFrame)
+				local success = pcall(currentResults.AdvanceToNextPageAsync, currentResults)
+
+				if success then
+					if currentCategory == "Bundles" or currentCategory == "Animations" then
+						displayBundles()
+					else
+						displayResultsInFrame(scrollingFrame)
+					end
 				end
 
-				task.wait(2)
+				if isMobile then
+					task.wait(2)
+				else
+					task.wait(0.5)
+				end
+
 				scrollingRefreshDebounce = false
 			end
 		end)
@@ -808,7 +964,11 @@ local function handleScaleSlider(slider)
 	local sliderConfig = {
 		snapFactor = 0.001,
 	}
-	if slider.Parent.Parent.Name == "Height" or slider.Parent.Parent.Name == "HeadSize" then
+	local extras = {
+		DefaultValue = math.round(100 * currentDescription[`{slider.Parent.Parent.Name}Scale`]),
+		TextBox = slider.Parent.Parent.Percentage,
+	}
+	if slider.Parent.Parent.Name == "Height" or slider.Parent.Parent.Name == "Head" then
 		sliderConfig.min = 75
 		sliderConfig.max = 125
 	elseif slider.Parent.Parent.Name == "Width" then
@@ -818,11 +978,23 @@ local function handleScaleSlider(slider)
 		sliderConfig.min = 0
 		sliderConfig.max = 100
 	end
-	local newSlider = Slider.new(slider.Parent, slider, slider.Button, sliderConfig, { DefaultValue = 100 })
-	scaleObliterator:Add(newSlider.ValueChanged.Event:Connect(function(sliderValue)
-		slider.Parent.Parent.Percentage.Text = `{math.round(sliderValue)}%`
-	end))
+
+	local newSlider = Slider.new(slider.Parent, slider, slider.Button, sliderConfig, extras)
+
+	newSlider.InteractionEnded.Event:Connect(function(lastValue)
+		if currentDescription[`{slider.Parent.Parent.Name}Scale`] == lastValue / 100 then
+			return
+		end
+
+		currentDescription[`{slider.Parent.Parent.Name}Scale`] = lastValue / 100
+		applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
+	end)
+
 	newSlider:Activate()
+
+	scaleObliterator:Add(function()
+		newSlider:Deactivate()
+	end, true)
 end
 
 local function handleCategoryButton(button: GuiBase, obliterator: typeof(Janitor.new()))
@@ -830,6 +1002,19 @@ local function handleCategoryButton(button: GuiBase, obliterator: typeof(Janitor
 		return
 	end
 	obliterator:Add(button.Activated:Connect(function()
+		if debounces.changeCategory then
+			return
+		end
+		debounces.changeCategory = true
+		task.delay(0.5, function()
+			debounces.changeCategory = false
+		end)
+
+		if currentCategory == "Scale" then
+			editor.Main.ScaleFrame.Visible = false
+			editor.Main.MainFrame.Visible = true
+		end
+
 		editor.Main.MainFrame.Search.Text = ""
 		openCategory(button.Name, "")
 	end))
@@ -840,6 +1025,15 @@ local function closeEditor(obliterator: typeof(Janitor.new()))
 	obliterator:Cleanup()
 	player.Character.Archivable = false
 	editor.Enabled = false
+	currentCategory = ""
+	Distort.Position = UDim2.fromScale(0, 0)
+	Distort.Size = UDim2.fromScale(1, 1)
+	Distort.Stop()
+	workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
+	workspace.CurrentCamera.FieldOfView = 70
+	workspace.CurrentCamera.FieldOfViewMode = Enum.FieldOfViewMode.Vertical
+	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+	editor.Main.MainFrame.Loading.Visible = false
 end
 
 local function openEditor(obliterator: typeof(Janitor.new()))
@@ -849,6 +1043,7 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 	player.Character.Archivable = true
 	currentDescription = player.Character.Humanoid:GetAppliedDescription()
 	starterDescription = currentDescription:Clone()
+	websiteDescription = websiteDescription or starterDescription
 
 	resetUI()
 
@@ -864,20 +1059,20 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 		handleCategoryButton(button, obliterator)
 	end
 
-	for _, frame in ipairs(editor.Main.ScaleFrame.Frame:GetChildren()) do
-		local sliderFrame = frame:FindFirstChild("SliderFrame")
-		if not sliderFrame then
-			continue
-		end
-
-		handleScaleSlider(sliderFrame.Slider)
-	end
-
 	obliterator:Add(editor.Main.BundleFrame.Close.Activated:Connect(function()
 		editor.Main.BundleFrame.Visible = false
+		bundleDetailsObliterator:Cleanup()
 	end))
 
 	obliterator:Add(editor.Main.BodyFrame.Scale.Activated:Connect(function()
+		if debounces.changeCategory then
+			return
+		end
+		debounces.changeCategory = true
+		task.delay(0.5, function()
+			debounces.changeCategory = false
+		end)
+
 		closeAllFrames()
 		setCategoryColor(currentCategory, Color3.fromRGB(255, 255, 255))
 		setCategoryColor("Scale", Color3.fromRGB(197, 197, 197))
@@ -886,9 +1081,26 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 		editor.Main.MainFrame.Search.Text = ""
 		editor.Main.BodyFrame.Visible = true
 		editor.Main.ScaleFrame.Visible = true
+
+		for _, frame in ipairs(editor.Main.ScaleFrame.Frame:GetChildren()) do
+			local sliderFrame = frame:FindFirstChild("SliderFrame")
+			if not sliderFrame then
+				continue
+			end
+
+			handleScaleSlider(sliderFrame.Slider)
+		end
 	end))
 
 	obliterator:Add(editor.Main.BodyFrame.Skin.Activated:Connect(function()
+		if debounces.changeCategory then
+			return
+		end
+		debounces.changeCategory = true
+		task.delay(0.5, function()
+			debounces.changeCategory = false
+		end)
+
 		closeAllFrames()
 		setCategoryColor(currentCategory, Color3.fromRGB(255, 255, 255))
 		setCategoryColor("Skin", Color3.fromRGB(197, 197, 197))
@@ -902,8 +1114,17 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 	handleCategoryButton(editor.Main.BodyFrame.Animations, obliterator)
 	handleCategoryButton(editor.Main.BodyFrame.Bundles, obliterator)
 	handleCategoryButton(editor.Main.BodyFrame.Face, obliterator)
+	--handleCategoryButton(editor.Main.BodyFrame.Head, obliterator)
 
 	obliterator:Add(editor.Main.OutfitsFrame.CreateOutfit.Activated:Connect(function()
+		if debounces.outfitAdd then
+			return
+		end
+		debounces.outfitAdd = true
+		task.delay(0.5, function()
+			debounces.outfitAdd = false
+		end)
+
 		if outfits and #outfits < 10 then
 			table.insert(outfits, currentDescription:Clone())
 			addOutfit:FireServer(serializeHumanoidDescription(currentDescription))
@@ -917,35 +1138,90 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 	end))
 
 	obliterator:Add(editor.Main.Apply.Activated:Connect(function()
-		editor.Enabled = false
-		resetUI()
+		if debounces.close then
+			return
+		end
+		debounces.close = true
+		task.delay(0.5, function()
+			debounces.close = false
+		end)
+
 		saveDescription:FireServer(serializeHumanoidDescription(currentDescription))
+		closeEditor(obliterator)
 	end))
 
 	obliterator:Add(editor.Main.WearingFrame.RemoveAll.Activated:Connect(function()
-		currentDescription.Shirt = 868697637
-		currentDescription.Pants = 868697782
-		currentDescription.GraphicTShirt = 0
-		currentDescription.Face = 144075659
-		currentDescription:SetAccessories({}, true)
+		if debounces.removeAll then
+			return
+		end
+		debounces.removeAll = true
+		task.delay(0.5, function()
+			debounces.removeAll = false
+		end)
+
+		--currentDescription.Head = 0
+		--currentDescription.Shirt = 868697637
+		--currentDescription.Pants = 868697782
+		--currentDescription.GraphicTShirt = 0
+		--currentDescription.Face = 144075659
+		--currentDescription:SetAccessories({}, true)
+
+		local duplicates = {}
+		for _, item in ipairs(getAllEquippedItems(currentDescription)) do
+			if duplicates[item.AssetId] then
+				continue
+			end
+			duplicates[item.AssetId] = true
+			unequipItem(currentDescription, item.AssetId, true)
+		end
+
+		currentDescription.HeightScale = websiteDescription.HeightScale
+		currentDescription.WidthScale = websiteDescription.WidthScale
+		currentDescription.HeadScale = websiteDescription.HeadScale
+		currentDescription.BodyTypeScale = websiteDescription.BodyTypeScale
+		currentDescription.ProportionScale = websiteDescription.ProportionScale
+
 		applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
+
+		wearingObliterator:Cleanup()
+		displayCurrentlyWearing()
 	end))
 
 	obliterator:Add(editor.Main.Cancel.Activated:Connect(function()
+		if debounces.close then
+			return
+		end
+		debounces.close = true
+		task.delay(0.5, function()
+			debounces.close = false
+		end)
+
 		applyDescription:FireServer(serializeHumanoidDescription(starterDescription))
 		closeEditor(obliterator)
 	end))
 
 	obliterator:Add(editor.Main.Reset.Activated:Connect(function()
+		if debounces.reset then
+			return
+		end
+		debounces.reset = true
+		task.delay(0.5, function()
+			debounces.reset = false
+		end)
+
 		resetUI()
 		resetDescription:FireServer()
 		currentDescription = Players:GetHumanoidDescriptionFromUserId(player.UserId)
 	end))
 
 	obliterator:Add(editor.Main.MainFrame.Search.FocusLost:Connect(function(entered)
-		if not entered or not currentCategory then
+		if not entered or not currentCategory or debounces.search then
 			return
 		end
+		debounces.search = true
+		task.delay(0.5, function()
+			debounces.search = false
+		end)
 		openCategory(currentCategory, editor.Main.MainFrame.Search.Text)
 	end))
 
@@ -957,6 +1233,49 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 			editor.Main[currentSuperCategory].ImageColor3 = Color3.fromRGB(255, 255, 255)
 		end
 	end, true)
+
+	obliterator:Add(editor.Main.ScaleFrame.Frame.IDSubmit.Activated:Connect(function()
+		if debounces.IDSubmit then
+			return
+		end
+		debounces.IDSubmit = true
+		task.delay(0.5, function()
+			debounces.IDSubmit = false
+		end)
+
+		local ID = tonumber(editor.Main.ScaleFrame.Frame.ID.Text)
+
+		if ID then
+			local assetType = assetTypeIdRemaps[MarketplaceService:GetProductInfo(ID).AssetTypeId]
+			local accessories = getAllEquippedItems(currentDescription)
+			local itemIndex = getItemIndex(accessories, ID)
+
+			if assetType == "DynamicHead" then
+				--bundleItemDisplay:Destroy()
+				--return
+				assetType = "Head"
+			end
+
+			if itemIndex then
+				unequipItem(currentDescription, ID)
+				return
+			elseif bodyParts[assetType] or animationCategories[assetType] then
+				currentDescription[assetType] = ID
+			elseif #accessories < accessoryLimit then
+				table.insert(accessories, {
+					AssetId = ID,
+					IsLayered = if accessoryTypeRemaps[assetType] then true else false,
+					AccessoryType = accessoryTypeRemaps[assetType] or Enum.AccessoryType[assetType],
+					Order = if accessoryTypeRemaps[assetType]
+						then #currentDescription:GetAccessories(false) + 1
+						else nil,
+				})
+			end
+
+			currentDescription:SetAccessories(accessories, true)
+			applyDescription:FireServer(serializeHumanoidDescription(currentDescription))
+		end
+	end))
 
 	for _, button in ipairs(editor.Main:GetChildren()) do
 		if not button:IsA("GuiButton") then
@@ -970,6 +1289,15 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 		end
 
 		obliterator:Add(button.Activated:Connect(function()
+			if debounces.changeCategory then
+				return
+			end
+			debounces.changeCategory = true
+			task.delay(0.5, function()
+				debounces.changeCategory = false
+			end)
+
+			local previousSuperCategory = currentSuperCategory
 			if #currentSuperCategory ~= 0 then
 				editor.Main[currentSuperCategory].ImageColor3 = Color3.fromRGB(255, 255, 255)
 			end
@@ -998,10 +1326,14 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 					editor.Main.MainFrame.Visible = true
 					openCategory("Shirt", "")
 				elseif currentSuperCategory == "Wearing" then
+					currentCategory = "Wearing"
+					editor.Main.MainFrame.Loading.Visible = false
 					editor.Main.MainFrame.Visible = true
 					wearingObliterator:Cleanup()
 					displayCurrentlyWearing()
 				elseif currentSuperCategory == "Outfits" then
+					currentCategory = "Outfits"
+					editor.Main.MainFrame.Loading.Visible = false
 					if not outfits then
 						outfits = getOutfits:InvokeServer()
 						while not outfits do
@@ -1020,6 +1352,13 @@ local function openEditor(obliterator: typeof(Janitor.new()))
 			end
 		end))
 	end
+
+	workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
+	workspace.CurrentCamera.FieldOfViewMode = Enum.FieldOfViewMode.MaxAxis
+	Distort.Position = UDim2.fromScale(-0.2, 0)
+	--Distort.Size = UDim2.fromScale(1, 1)
+	Distort.Start()
+	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
 
 	currentSuperCategory = "Accessory"
 	editor.Main[currentSuperCategory].ImageColor3 = Color3.fromRGB(197, 197, 197)
@@ -1049,6 +1388,19 @@ local function main()
 			openEditor(obliterator)
 		end
 	end)
+
+	task.delay(1, function()
+		editor.Main.Slots.Template:Destroy()
+		editor.Main.MainFrame.Items.Template:Destroy()
+		editor.Main.BundleFrame.Items.Template:Destroy()
+		editor.Main.OutfitsFrame.Items.Template:Destroy()
+	end)
+
+	for _, object in ipairs(editor.Main:GetDescendants()) do
+		if object:FindFirstChild("Description") then
+			DescriptionUI(object, object.Description)
+		end
+	end
 end
 
 main()
